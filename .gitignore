@@ -17,3 +17,6 @@
 *.user
 .vs/
 .idea/
+
+# git transport files
+*.bundle
