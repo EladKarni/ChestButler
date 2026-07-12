@@ -84,7 +84,7 @@ Some notes on how it's built: every item transfer goes through MultiUserChest's 
 Playing on our server? Import the ready-made profile instead: in the mod manager go to Import / Update, pick "Import new profile", choose "From code" and paste:
 
 ```
-019f5551-b2ec-f3c4-e5ea-b9d6721e5cd9
+019f56be-5a3d-1f95-1b1e-9c8aa52a8a6b
 ```
 
 That sets up the exact mods and versions the server runs.
