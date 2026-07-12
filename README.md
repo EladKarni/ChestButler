@@ -17,7 +17,7 @@
   <h3 align="center">ChestButler</h3>
 
   <p align="center">
-    Your loot, put away for you. A Valheim mod that turns any chest into a sorter - dump everything in, close the lid, and items fly to the right chests around your base.
+    A Valheim mod that sorts your storage for you. Dump everything into one chest and it gets distributed to the right chests around your base.
     <br />
     <br />
     <a href="https://github.com/EladKarni/ChestButler/issues">Report Bug</a>
@@ -51,21 +51,19 @@
 <!-- ABOUT THE PROJECT -->
 ## About The Project
 
-Base-keeping in Valheim means hauling loot to a dozen chests by hand. ChestButler fixes that with one idea: **designated sorter chests**. Dump your entire inventory into one, close it, and every item routes itself to the right storage chest nearby - stone to the stone chest, carrots to the cooking chest, overflow to wherever fits.
+Storage in Valheim gets out of hand fast. You come back from a mining trip and spend five minutes walking between chests putting everything away.
 
-It also works in reverse: chests with saved filters get a **Pull** button that fetches a stack of each wanted item from surrounding storage on demand.
+This mod adds a "Sorter" toggle to chests. Anything you dump into a sorter chest gets moved to the right chest nearby when you close it. Stone goes where your stone already is, carrots end up in the kitchen, and anything the mod can't figure out just stays in the sorter so nothing is ever lost.
 
-Design principles:
+It works in the other direction too. You can pin a set of items to a chest and give it a Pull button that grabs those items from nearby storage. I use this for a cooking chest next to the cauldron that restocks itself on demand.
 
-* **Zero-loss by construction.** Items that nothing claims stay in the sorter. Every transfer runs through MultiUserChest's owner-routed networking - no dupes, no vanishing stacks, safe with several players online.
-* **Zero-config to start.** With no setup at all, items route to chests that already contain them (fullest chest first). Filters, groups, signs and priorities refine from there.
-* **Server-authoritative config.** All settings (radius, speed, item groups) sync from the server; everyone plays by the same rules.
+Some notes on how it's built: every item transfer goes through MultiUserChest's networking, which means only the actual owner of a chest ever modifies it. This is the part most sorting mods get wrong, and it's why some of them eat items on multiplayer servers. Config lives on the server and syncs to everyone, so the whole group runs the same rules.
 
 ### Built With
 
-* [BepInEx](https://github.com/BepInEx/BepInEx) + [HarmonyX](https://github.com/BepInEx/HarmonyX)
-* [Jötunn (JVL)](https://valheim-modding.github.io/Jotunn/)
-* [MultiUserChest](https://github.com/MSchmoecker/No-Chest-Block) - networking layer for all item moves
+* [BepInEx](https://github.com/BepInEx/BepInEx) and [HarmonyX](https://github.com/BepInEx/HarmonyX)
+* [Jötunn](https://valheim-modding.github.io/Jotunn/)
+* [MultiUserChest](https://github.com/MSchmoecker/No-Chest-Block)
 * C# / .NET Framework 4.7.2
 
 
@@ -75,29 +73,29 @@ Design principles:
 
 ### Prerequisites
 
-* Valheim on **Steam** (PC). Xbox / Game Pass cannot run client mods.
-* A mod manager: [r2modman or Thunderstore Mod Manager](https://valheim.thunderstore.io) → “Get Manager”.
+* Valheim on Steam. The Xbox / Game Pass version can't run client mods.
+* A mod manager. Grab r2modman from [valheim.thunderstore.io](https://valheim.thunderstore.io) via the "Get Manager" button.
 
 ### Installation
 
-1. In your mod manager, search for **ChestButler** in the Online tab and click Install - BepInEx, Jötunn and MultiUserChest install automatically as dependencies.
-2. Launch via **Start modded**.
+1. Search for ChestButler in the mod manager's Online tab and install it. The dependencies (BepInEx, Jötunn, MultiUserChest) come with it.
+2. Launch the game with "Start modded".
 
-Manual install: drop `ChestButler.dll` (plus the dependencies) into `BepInEx/plugins/`.
+If you prefer installing by hand, drop `ChestButler.dll` and the dependency DLLs into `BepInEx/plugins/`.
 
-**Multiplayer:** the mod must be installed on the **server and every client**, same version - mismatches are refused at connect with a clear message. Crossplay must be disabled (Steam networking only). On a managed host (e.g. CubeCoders AMP): enable the BepInEx option, then upload `ChestButler.dll`, `Jotunn.dll` and `MultiUserChest.dll` to `BepInEx/plugins/`.
+For multiplayer, the server and every player need the mod at the same version. Anyone missing it gets a message at connect telling them what to install. Crossplay has to be off since modded servers are Steam only. On a managed host like CubeCoders AMP, enable the BepInEx option in the instance config and upload `ChestButler.dll`, `Jotunn.dll` and `MultiUserChest.dll` to `BepInEx/plugins/`.
 
 
 
 <!-- GETTING STARTED: DEVELOPERS -->
 ## Getting Started (Developers)
 
-The build is fully offline by design - no NuGet restore; every reference is a local DLL.
+The project builds offline. There is no NuGet restore; every reference is a local DLL sitting in the repo.
 
 ### Prerequisites
 
-* .NET SDK 8.0+
-* A local Valheim install (for the game assemblies)
+* .NET SDK 8.0 or newer
+* A Valheim install (you need its game assemblies to compile)
 
 ### Build setup
 
@@ -105,13 +103,13 @@ The build is fully offline by design - no NuGet restore; every reference is a lo
    ```sh
    git clone https://github.com/EladKarni/ChestButler.git
    ```
-2. Copy the game's `valheim_Data/Managed/` folder into the repo root as `Managed/` (never committed).
-3. Drop the modding-stack DLLs into `libs/` - see [`libs/README.md`](libs/README.md) for the exact four files and where to get them.
+2. Copy `valheim_Data/Managed/` from your game install into the repo root as `Managed/`. It stays untracked.
+3. Put the four modding DLLs into `libs/`. See [`libs/README.md`](libs/README.md) for which files and where to find them.
 4. Build:
    ```sh
    ./build.sh          # or: dotnet build src/ChestButler/ChestButler.csproj -c Release
    ```
-   Output lands in `dist/ChestButler.dll`. Framework references resolve from `Managed/` via `FrameworkPathOverride`; `NuGet.config` deliberately has zero package sources.
+   The DLL ends up in `dist/`. Framework references resolve out of `Managed/` through `FrameworkPathOverride`, and `NuGet.config` has no package sources on purpose.
 
 ### Architecture map
 
@@ -119,33 +117,33 @@ The build is fully offline by design - no NuGet restore; every reference is a lo
 |---|---|
 | Plugin entry, config | `src/ChestButler/Plugin.cs` |
 | Sorting engine (owner-gated tick) | `Core/SorterBehaviour.cs` |
-| Routing rules (tiers, priority, consolidation) | `Core/Router.cs` |
-| Per-chest filters (ZDO pins + sign parsing) | `Core/Filters.cs`, `Core/SorterZdo.cs` |
+| Routing rules | `Core/Router.cs` |
+| Per-chest filters (ZDO pins, sign parsing) | `Core/Filters.cs`, `Core/SorterZdo.cs` |
 | Pull/restock | `Core/Puller.cs` |
-| Item groups (synced config) | `Core/Groups.cs`, `Core/Names.cs` |
-| Chest-UI toolbar | `Patches/GuiPatch.cs` |
+| Item groups | `Core/Groups.cs`, `Core/Names.cs` |
+| Chest UI toolbar | `Patches/GuiPatch.cs` |
 
-Key invariant to preserve in any PR: **inventories are only ever mutated by their ZDO owner** - all cross-chest moves go through MultiUserChest's request/response API. Direct `Inventory.AddItem` on a remote chest is how the mod this replaces destroyed items.
+One rule matters more than any other in this codebase: never write to an inventory you don't own. All chest-to-chest moves go through MultiUserChest's request/response API, which routes the change to whichever peer owns the target chest. Writing straight into a remote chest's `Inventory` is exactly how the old Smarter Containers mod ended up deleting items, so PRs that bypass this will be rejected.
 
 
 
 <!-- USAGE -->
 ## Usage
 
-Buttons appear at the bottom of every chest UI:
+Buttons show up at the bottom of every chest UI:
 
 | Button | Shown on | Does |
 |---|---|---|
-| `Sorter: ON/OFF` | any chest | makes it a dump chest - contents distribute when closed |
-| `Pin` → `Auto (n)`/`Manual (n)` | non-sorter chests | saves current contents as filters; then toggles auto-fill vs pull-only |
-| `Clear` | chests with filters | erases saved filters |
-| `Pull` | chests with filters | fetches one stack of each saved type from nearby chests |
+| `Sorter: ON/OFF` | any chest | marks it as a dump chest, contents distribute when closed |
+| `Pin`, then `Auto (n)`/`Manual (n)` | normal chests | saves the current contents as filters, then toggles whether the sorter fills it automatically |
+| `Clear` | chests with filters | wipes the saved filters |
+| `Pull` | chests with filters | grabs one stack of each saved item from nearby chests |
 
-**Sign labels** (optional): place a sign on/next to a chest - `sort: cooking`, `sort: finewood, trophy*, p5`, `sort: off`. Tokens: group names, item names (`*` wildcards), `pN` priority, `off` to exclude.
+You can also label a chest with a sign placed on or next to it. `sort: cooking` makes it the cooking chest. Other examples: `sort: finewood, trophy*, p5` (item names, wildcards and a priority) or `sort: off` to make the sorter ignore a chest entirely.
 
-**Routing order:** explicit item filter → group filter → “already contains it”. Ties: higher priority, then most-of-that-item held, then nearest. Partial fills top off a chest and re-route the remainder.
+Routing picks a target in this order: a chest that names the item, then a chest whose group covers it, then any chest that already holds some. Ties go to higher priority, then to whichever chest holds the most of that item, then to the nearest one. If the best chest only has room for part of a stack it gets topped off and the rest re-routes.
 
-**Config:** `BepInEx/config/light.chestbutler.cfg` - radius (default 20 m), tick rate, stacks per tick, contains-fallback, and all item groups under `[ItemGroups]`. Server values win and sync to clients.
+Config is in `BepInEx/config/light.chestbutler.cfg`: sorting radius (20 m default), tick rate, stacks per tick, the contains fallback, and all the item groups under `[ItemGroups]`. The server's values win and sync to clients.
 
 
 
@@ -153,13 +151,13 @@ Buttons appear at the bottom of every chest UI:
 ## Roadmap
 
 * [ ] Transfer VFX/SFX on chests
-* [ ] Gamepad support for the chest-UI toolbar
-* [ ] Filter-editor panel (view/remove individual pinned items, group checkboxes)
+* [ ] Gamepad support for the chest UI toolbar
+* [ ] Filter editor panel (view and remove individual pinned items, group checkboxes)
 * [ ] Craftable dedicated Sorter Chest piece
 * [ ] Localization
-* [ ] Valheim 1.0 (“Deep North”, Sept 2026) compatibility pass
+* [ ] Valheim 1.0 ("Deep North", Sept 2026) compatibility pass
 
-See [open issues](https://github.com/EladKarni/ChestButler/issues) for the full list.
+See the [open issues](https://github.com/EladKarni/ChestButler/issues) for the full list.
 
 
 
@@ -172,11 +170,11 @@ Contributions are what make the open source community such an amazing place to l
 2. Create your Feature Branch (`git checkout -b feature/AmazingFeature`)
 3. Commit your Changes (`git commit -m 'Add some AmazingFeature'`)
 4. Push to the Branch (`git push origin feature/AmazingFeature`)
-5. Open a Pull Request **against `dev`**
+5. Open a Pull Request against `dev`
 
-Branch model: `dev` (active work) → `staging` (group playtesting) → `prod` (what the live server runs) → `main` (latest published release).
+Branches: `dev` is where work happens, `staging` is what our group playtests, `prod` is what the live server runs, and `main` tracks the latest published release.
 
-House rules: never commit game assemblies (`Managed/`) or third-party DLLs (`libs/`); keep the owner-only mutation invariant; test multiplayer-sensitive changes with two clients before PR.
+A few ground rules: don't commit game assemblies (`Managed/`) or third-party DLLs (`libs/`), keep the ownership rule described above intact, and test anything multiplayer-sensitive with two clients before opening the PR.
 
 
 
@@ -199,9 +197,9 @@ Project Link: [https://github.com/EladKarni/ChestButler](https://github.com/Elad
 <!-- ACKNOWLEDGEMENTS -->
 ## Acknowledgements
 
-* [MultiUserChest](https://github.com/MSchmoecker/No-Chest-Block) and [ItemHopper](https://github.com/MSchmoecker/ValheimHopper) by MSchmoecker - the proof that safe networked item moves are possible, and the library this mod stands on
-* [Jötunn](https://valheim-modding.github.io/Jotunn/) - mod compatibility & synced config
-* Smarter Containers by Flueno - the original concept (rebuilt here from scratch with a safe transfer engine)
+* [MultiUserChest](https://github.com/MSchmoecker/No-Chest-Block) and [ItemHopper](https://github.com/MSchmoecker/ValheimHopper) by MSchmoecker. The networking approach here is built on MUC, and ItemHopper's source was the reference for doing chest transfers safely.
+* [Jötunn](https://valheim-modding.github.io/Jotunn/) for mod compatibility checks and synced config.
+* Smarter Containers by Flueno, which had the right idea years ago. This is a from-scratch rebuild of that concept with a transfer engine that doesn't lose items.
 * [Best-README-Template](https://github.com/EladKarni/Best-README-Template)
 
 

@@ -1,9 +1,10 @@
 # Changelog
 
 ## 1.0.0
-- Initial public release
-- Sorter chest toggle, tiered routing (pins > groups > contains), consolidation by held-count, partial fills
-- Pin / Auto / Manual / Clear / Pull chest-UI toolbar
-- Sign labels (`sort: ...`) with groups, wildcards, priority, off
-- Server-synced config incl. editable item groups
-- Version handshake: everyone must run the same minor version
+- First public release
+- Sorter chest toggle with tiered routing: pinned filters, then groups, then chests that already hold the item
+- Consolidation (fullest chest wins ties) and partial fills
+- Pin / Auto / Manual / Clear / Pull buttons in the chest UI
+- Sign labels (`sort: ...`) with groups, wildcards, priority and off
+- Server-synced config including editable item groups
+- Same-version check for server and clients at connect
