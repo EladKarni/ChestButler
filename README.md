@@ -81,6 +81,14 @@ Some notes on how it's built: every item transfer goes through MultiUserChest's 
 1. Search for ChestButler in the mod manager's Online tab and install it. The dependencies (BepInEx, Jötunn, MultiUserChest) come with it.
 2. Launch the game with "Start modded".
 
+Playing on our server? Import the ready-made profile instead: in the mod manager go to Import / Update, pick "Import new profile", choose "From code" and paste:
+
+```
+019f5551-b2ec-f3c4-e5ea-b9d6721e5cd9
+```
+
+That sets up the exact mods and versions the server runs.
+
 If you prefer installing by hand, drop `ChestButler.dll` and the dependency DLLs into `BepInEx/plugins/`.
 
 For multiplayer, the server and every player need the mod at the same version. Anyone missing it gets a message at connect telling them what to install. Crossplay has to be off since modded servers are Steam only. On a managed host like CubeCoders AMP, enable the BepInEx option in the instance config and upload `ChestButler.dll`, `Jotunn.dll` and `MultiUserChest.dll` to `BepInEx/plugins/`.
