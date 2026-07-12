@@ -76,7 +76,8 @@ jobs:
       - name: Package Thunderstore zip
         run: |
           cp dist/ChestButler.dll pkg/
-          cd pkg && zip -q "../ChestButler-${{ steps.ver.outputs.version }}.zip" manifest.json icon.png README.md CHANGELOG.md ChestButler.dll
+          cp LICENSE pkg/
+          cd pkg && zip -q "../ChestButler-${{ steps.ver.outputs.version }}.zip" manifest.json icon.png README.md CHANGELOG.md LICENSE ChestButler.dll
 
       - name: Upload DLL artifact
         uses: actions/upload-artifact@v4

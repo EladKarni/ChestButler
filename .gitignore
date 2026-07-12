@@ -20,3 +20,4 @@
 
 # git transport files
 *.bundle
+/pkg/LICENSE
