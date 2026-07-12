@@ -1,0 +1,19 @@
+# game assemblies & third-party binaries (sourced locally, never committed)
+/Managed/
+/libs/*.dll
+
+# build output & packaging artifacts
+/dist/
+/deploy/
+/pkg/ChestButler.dll
+**/bin/
+**/obj/
+*.zip
+
+# local media / large files
+*.mp4
+
+# editor cruft
+*.user
+.vs/
+.idea/

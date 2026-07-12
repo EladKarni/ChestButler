@@ -1,0 +1,43 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net472</TargetFramework>
+    <AssemblyName>ChestButler</AssemblyName>
+    <RootNamespace>ChestButler</RootNamespace>
+    <Version>0.2.0</Version>
+    <LangVersion>10</LangVersion>
+    <Nullable>disable</Nullable>
+    <DebugType>portable</DebugType>
+
+    <FrameworkPathOverride>$(MSBuildThisFileDirectory)../../Managed</FrameworkPathOverride>
+    <AutomaticallyUseReferenceAssemblyPackages>false</AutomaticallyUseReferenceAssemblyPackages>
+    <EnableSourceControlManagerQueries>false</EnableSourceControlManagerQueries>
+    <EnableSourceLink>false</EnableSourceLink>
+
+    <OutputPath>$(MSBuildThisFileDirectory)../../dist/</OutputPath>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <CopyLocalLockFileAssemblies>false</CopyLocalLockFileAssemblies>
+    <ProduceReferenceAssembly>false</ProduceReferenceAssembly>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- modding stack (/libs) -->
+    <Reference Include="BepInEx"><HintPath>$(MSBuildThisFileDirectory)../../libs/BepInEx.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="0Harmony"><HintPath>$(MSBuildThisFileDirectory)../../libs/0Harmony.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="Jotunn"><HintPath>$(MSBuildThisFileDirectory)../../libs/Jotunn.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="MultiUserChest"><HintPath>$(MSBuildThisFileDirectory)../../libs/MultiUserChest.dll</HintPath><Private>false</Private></Reference>
+
+    <!-- game + engine (/Managed) -->
+    <Reference Include="assembly_valheim"><HintPath>$(MSBuildThisFileDirectory)../../Managed/assembly_valheim.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="assembly_utils"><HintPath>$(MSBuildThisFileDirectory)../../Managed/assembly_utils.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="assembly_guiutils"><HintPath>$(MSBuildThisFileDirectory)../../Managed/assembly_guiutils.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="UnityEngine"><HintPath>$(MSBuildThisFileDirectory)../../Managed/UnityEngine.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="UnityEngine.CoreModule"><HintPath>$(MSBuildThisFileDirectory)../../Managed/UnityEngine.CoreModule.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="UnityEngine.UI"><HintPath>$(MSBuildThisFileDirectory)../../Managed/UnityEngine.UI.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="UnityEngine.UIModule"><HintPath>$(MSBuildThisFileDirectory)../../Managed/UnityEngine.UIModule.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="UnityEngine.TextRenderingModule"><HintPath>$(MSBuildThisFileDirectory)../../Managed/UnityEngine.TextRenderingModule.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="Unity.TextMeshPro"><HintPath>$(MSBuildThisFileDirectory)../../Managed/Unity.TextMeshPro.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="netstandard"><HintPath>$(MSBuildThisFileDirectory)../../Managed/netstandard.dll</HintPath><Private>false</Private></Reference>
+  </ItemGroup>
+
+</Project>
