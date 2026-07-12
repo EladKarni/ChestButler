@@ -71,7 +71,16 @@ jobs:
 
       - name: Read version
         id: ver
-        run: echo "version=$(grep -oPm1 '(?<=<Version>)[^<]+' src/ChestButler/ChestButler.csproj)" >> "$GITHUB_OUTPUT"
+        run: |
+          CSPROJ=$(grep -oPm1 '(?<=<Version>)[^<]+' src/ChestButler/ChestButler.csproj)
+          PLUGIN=$(grep -oPm1 '(?<=ModVersion = ")[^"]+' src/ChestButler/Plugin.cs)
+          MANIFEST=$(grep -oPm1 '(?<="version_number": ")[^"]+' pkg/manifest.json)
+          echo "csproj=$CSPROJ plugin=$PLUGIN manifest=$MANIFEST"
+          if [ "$CSPROJ" != "$PLUGIN" ] || [ "$CSPROJ" != "$MANIFEST" ]; then
+            echo "::error::Version mismatch between csproj ($CSPROJ), Plugin.cs ($PLUGIN) and manifest.json ($MANIFEST)"
+            exit 1
+          fi
+          echo "version=$CSPROJ" >> "$GITHUB_OUTPUT"
 
       - name: Package Thunderstore zip
         run: |
