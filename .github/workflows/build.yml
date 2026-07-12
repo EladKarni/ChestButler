@@ -1,0 +1,92 @@
+name: Build
+
+on:
+  push:
+    branches: [main, prod, staging, dev]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache Valheim server files
+        uses: actions/cache@v4
+        with:
+          path: serverfiles
+          key: valheim-server-896660
+
+      - name: Install SteamCMD
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q lib32gcc-s1
+          mkdir -p steamcmd
+          curl -sSL https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz | tar zx -C steamcmd
+
+      - name: Download Valheim dedicated server (game assemblies)
+        run: |
+          ./steamcmd/steamcmd.sh +force_install_dir "$PWD/serverfiles" +login anonymous +app_update 896660 validate +quit
+          mkdir -p Managed
+          cp serverfiles/valheim_server_Data/Managed/*.dll Managed/
+
+      - name: Download modding dependencies (pinned versions)
+        run: |
+          mkdir -p deps libs
+          curl -sSL -o deps/bepinex.zip https://thunderstore.io/package/download/denikson/BepInExPack_Valheim/5.4.2333/
+          curl -sSL -o deps/jotunn.zip  https://thunderstore.io/package/download/ValheimModding/Jotunn/2.29.1/
+          curl -sSL -o deps/muc.zip     https://thunderstore.io/package/download/MSchmoecker/MultiUserChest/0.6.1/
+          for z in deps/*.zip; do unzip -oq "$z" -d "${z%.zip}"; done
+          find deps -name BepInEx.dll        -exec cp {} libs/ \;
+          find deps -name 0Harmony.dll       -exec cp {} libs/ \;
+          find deps -name Jotunn.dll         -exec cp {} libs/ \;
+          find deps -name MultiUserChest.dll -exec cp {} libs/ \;
+          ls -la libs/
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Build
+        run: |
+          dotnet build src/ChestButler/ChestButler.csproj -c Release
+          find dist -type f ! -name 'ChestButler.dll' ! -name 'ChestButler.pdb' -delete
+          ls -la dist/
+
+      - name: Read version
+        id: ver
+        run: echo "version=$(grep -oPm1 '(?<=<Version>)[^<]+' src/ChestButler/ChestButler.csproj)" >> "$GITHUB_OUTPUT"
+
+      - name: Package Thunderstore zip
+        run: |
+          cp dist/ChestButler.dll pkg/
+          cd pkg && zip -q "../ChestButler-${{ steps.ver.outputs.version }}.zip" manifest.json icon.png README.md CHANGELOG.md ChestButler.dll
+
+      - name: Upload DLL artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ChestButler-dll-${{ steps.ver.outputs.version }}
+          path: |
+            dist/ChestButler.dll
+            dist/ChestButler.pdb
+
+      - name: Upload Thunderstore package artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ChestButler-thunderstore-${{ steps.ver.outputs.version }}
+          path: ChestButler-${{ steps.ver.outputs.version }}.zip
+
+      - name: Attach to release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/ChestButler.dll
+            ChestButler-${{ steps.ver.outputs.version }}.zip
+          generate_release_notes: true
