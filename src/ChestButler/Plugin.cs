@@ -15,9 +15,9 @@ namespace ChestButler
     [NetworkCompatibility(CompatibilityLevel.EveryoneMustHaveMod, VersionStrictness.Minor)]
     public class Plugin : BaseUnityPlugin
     {
-        public const string ModGuid = "light.chestbutler";
+        public const string ModGuid = "eksolutions.chestbutler";
         public const string ModName = "ChestButler";
-        public const string ModVersion = "1.0.0";
+        public const string ModVersion = "1.0.1";
 
         internal static ManualLogSource Log;
         internal static ConfigEntry<float> SorterRadius;

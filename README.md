@@ -151,7 +151,7 @@ You can also label a chest with a sign placed on or next to it. `sort: cooking` 
 
 Routing picks a target in this order: a chest that names the item, then a chest whose group covers it, then any chest that already holds some. Ties go to higher priority, then to whichever chest holds the most of that item, then to the nearest one. If the best chest only has room for part of a stack it gets topped off and the rest re-routes.
 
-Config is in `BepInEx/config/light.chestbutler.cfg`: sorting radius (20 m default), tick rate, stacks per tick, the contains fallback, and all the item groups under `[ItemGroups]`. The server's values win and sync to clients.
+Config is in `BepInEx/config/eksolutions.chestbutler.cfg`: sorting radius (20 m default), tick rate, stacks per tick, the contains fallback, and all the item groups under `[ItemGroups]`. The server's values win and sync to clients.
 
 
 

@@ -24,7 +24,7 @@ Every transfer runs through MultiUserChest's networking, so only the actual owne
 
 ## Setup notes
 
-Config: `BepInEx/config/light.chestbutler.cfg` (radius, speed, fallback behavior, item groups). Server values sync to all clients.
+Config: `BepInEx/config/eksolutions.chestbutler.cfg` (radius, speed, fallback behavior, item groups). Server values sync to all clients.
 
 Multiplayer needs the mod on the server and every client at the same version. Mismatches get a clear message at connect. Crossplay must be off.
 
