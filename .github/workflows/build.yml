@@ -2,9 +2,8 @@ name: Build
 
 on:
   push:
-    branches: [main, prod, staging, dev]
+    branches: [prod]
     tags: ['v*']
-  pull_request:
   workflow_dispatch:
 
 permissions:
