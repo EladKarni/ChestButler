@@ -27,13 +27,24 @@ jobs:
           sudo apt-get update -q
           sudo apt-get install -y -q lib32gcc-s1
           mkdir -p steamcmd
-          curl -sSL https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz | tar zx -C steamcmd
+          curl -fsSL -o steamcmd.tar.gz https://cdn.cloudflare.steamstatic.com/client/installer/steamcmd_linux.tar.gz \
+            || curl -fsSL -o steamcmd.tar.gz https://media.steampowered.com/installer/steamcmd_linux.tar.gz \
+            || curl -fsSL -o steamcmd.tar.gz https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz
+          tar zxf steamcmd.tar.gz -C steamcmd
+          ./steamcmd/steamcmd.sh +quit || true   # first run self-updates; its exit code is unreliable
 
       - name: Download Valheim dedicated server (game assemblies)
         run: |
-          ./steamcmd/steamcmd.sh +force_install_dir "$PWD/serverfiles" +login anonymous +app_update 896660 validate +quit
+          ok=0
+          for i in 1 2 3; do
+            ./steamcmd/steamcmd.sh +force_install_dir "$PWD/serverfiles" +login anonymous +app_update 896660 validate +quit && ok=1 && break
+            echo "steamcmd attempt $i failed, retrying in 15s"; sleep 15
+          done
+          test "$ok" = "1"
+          test -d serverfiles/valheim_server_Data/Managed
           mkdir -p Managed
           cp serverfiles/valheim_server_Data/Managed/*.dll Managed/
+          echo "copied $(ls Managed | wc -l) assemblies"
 
       - name: Download modding dependencies (pinned versions)
         run: |
