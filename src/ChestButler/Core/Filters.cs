@@ -29,8 +29,8 @@ namespace ChestButler.Core
     }
 
     /// <summary>Per-chest filters from two sources:
-    /// 1. Pinned items — "Pin contents" button, stored as CSV in the chest ZDO.
-    /// 2. Sign labels — a sign within range reading "sort: cooking, stone, p2".
+    /// 1. Pinned items - "Pin contents" button, stored as CSV in the chest ZDO.
+    /// 2. Sign labels - a sign within range reading "sort: cooking, stone, p2".
     /// Tokens: group names, item tokens ('*' wildcards), pN = priority, off = ignore chest.</summary>
     internal static class Filters
     {

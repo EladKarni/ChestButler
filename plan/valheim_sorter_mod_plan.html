@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Project Sorter — Valheim Chest-Sorting Mod Build Plan</title>
+<title>Project Sorter - Valheim Chest-Sorting Mod Build Plan</title>
 <style>
   :root{
     --bg:#171310; --panel:#211b14; --panel2:#2a2219; --line:#3d3222;
@@ -133,8 +133,8 @@
 
 <header>
   <div class="kicker">Build Plan · Valheim BepInEx Mod · July 10, 2026</div>
-  <h1>Project Sorter <span class="thin">— the dump-chest that puts everything away</span></h1>
-  <p class="sub">Walk into camp. Dump your entire inventory into one chest. Stone flies to the stone chest, carrots to the cooking chest, silver to the vault — automatically, safely, on your multiplayer server. This document is the complete engineering plan, built from a code autopsy of the mod that tried this (and deletes items) and the two open-source mods that prove every piece works.</p>
+  <h1>Project Sorter <span class="thin"> -  the dump-chest that puts everything away</span></h1>
+  <p class="sub">Walk into camp. Dump your entire inventory into one chest. Stone flies to the stone chest, carrots to the cooking chest, silver to the vault - automatically, safely, on your multiplayer server. This document is the complete engineering plan, built from a code autopsy of the mod that tried this (and deletes items) and the two open-source mods that prove every piece works.</p>
 </header>
 
 <div class="verdict">
@@ -170,47 +170,47 @@
     <tr><th style="width:32%">As a player…</th><th>The mod does…</th></tr>
     <tr><td>I dump 3 stacks of stone into the sorter</td><td>Stone moves to the chest designated (or already holding) stone</td></tr>
     <tr><td>I dump carrots, turnips, onions</td><td>All route to the chest tagged with the <code>Cooking</code> group</td></tr>
-    <tr><td>I dump something no chest wants</td><td>It <strong>stays in the sorter</strong> — never dropped, never deleted</td></tr>
-    <tr><td>My friend dumps loot at the same time</td><td>Transfers are RPC-routed to each chest's owner — no dupes, no loss</td></tr>
+    <tr><td>I dump something no chest wants</td><td>It <strong>stays in the sorter</strong> - never dropped, never deleted</td></tr>
+    <tr><td>My friend dumps loot at the same time</td><td>Transfers are RPC-routed to each chest's owner - no dupes, no loss</td></tr>
     <tr><td>The target chest is full</td><td>Router tries the next matching chest; otherwise item waits in sorter</td></tr>
-    <tr><td>A chest is behind someone else's ward</td><td>Respected — the router never bypasses <code>CheckAccess</code></td></tr>
+    <tr><td>A chest is behind someone else's ward</td><td>Respected - the router never bypasses <code>CheckAccess</code></td></tr>
   </table>
 
   <h3>Non-goals (v1)</h3>
-  <p>No cross-base logistics (sorting only runs while the area is loaded, i.e. a player is nearby — Valheim unloads empty zones), no crafting-station auto-feed, no console/crossplay support (BepInEx is Steam-only), no item teleportation across the map. Phase 5 lists stretch goals.</p>
+  <p>No cross-base logistics (sorting only runs while the area is loaded, i.e. a player is nearby - Valheim unloads empty zones), no crafting-station auto-feed, no console/crossplay support (BepInEx is Steam-only), no item teleportation across the map. Phase 5 lists stretch goals.</p>
 </section>
 
 <!-- ================= 2 LANDSCAPE ================= -->
 <section id="landscape">
-  <h2><span class="num">02</span>Why build it — the landscape (verified July 2026)</h2>
+  <h2><span class="num">02</span>Why build it - the landscape (verified July 2026)</h2>
   <p>Nothing maintained does designated-chest → filtered-chest distribution. The one mod that did is abandoned and now destroys items.</p>
   <table>
     <tr><th>Mod</th><th>Chest→chest?</th><th>Filters</th><th>Status</th><th class="c">Match</th></tr>
     <tr>
       <td><strong>Smarter Containers</strong> (Flueno)</td>
-      <td>Yes — forwards inserted items to chests already holding them</td>
+      <td>Yes - forwards inserted items to chests already holding them</td>
       <td>Groups + prefix/type buckets</td>
       <td>Abandoned Nov 2023 · <strong>deletes items</strong> post-2023 network rewrite</td>
       <td class="c"><span class="pill red">CONCEPT ✓ / DEAD</span></td>
     </tr>
     <tr>
       <td><strong>ItemHopper</strong> (MSchmoecker)</td>
-      <td>Yes — hopper pieces pipe items between chests</td>
+      <td>Yes - hopper pieces pipe items between chests</td>
       <td>One exact item per hopper slot</td>
       <td>Maintained · MIT source</td>
       <td class="c"><span class="pill gold">PARTIAL</span></td>
     </tr>
     <tr>
       <td><strong>AzuAutoStore</strong> (Azumatt)</td>
-      <td>No — player/ground → chest only</td>
+      <td>No - player/ground → chest only</td>
       <td>Per-chest-type YAML groups</td>
       <td>Maintained (Apr 2026)</td>
       <td class="c"><span class="pill gold">PARTIAL</span></td>
     </tr>
     <tr>
       <td><strong>QuickStackStore</strong> (Goldenrevolver)</td>
-      <td>No — inventory buttons only</td>
-      <td>—</td>
+      <td>No - inventory buttons only</td>
+      <td> - </td>
       <td>Maintained</td>
       <td class="c"><span class="pill grey">NO</span></td>
     </tr>
@@ -224,16 +224,16 @@
   </table>
   <div class="callout green">
     <div class="ttl">The opportunity</div>
-    Smarter Containers proves demand and the concept; ItemHopper + MultiUserChest prove the <em>safe implementation</em> under MIT license. We combine them: Smarter Containers' UX with ItemHopper's engineering — plus true "designated sorter" semantics neither has.
+    Smarter Containers proves demand and the concept; ItemHopper + MultiUserChest prove the <em>safe implementation</em> under MIT license. We combine them: Smarter Containers' UX with ItemHopper's engineering - plus true "designated sorter" semantics neither has.
   </div>
 </section>
 
 <!-- ================= 3 AUTOPSY ================= -->
 <section id="autopsy">
-  <h2><span class="num">03</span>Code autopsy — why Smarter Containers deletes items</h2>
+  <h2><span class="num">03</span>Code autopsy - why Smarter Containers deletes items</h2>
   <p>We read the full decompiled source (v1.7.0, via Thunderstore's decompiler). The mod is a single Harmony postfix on <code>Inventory.AddItem</code>: when you Ctrl-click an item into an open chest, it intercepts the add and re-routes the stack to a nearby chest. The fatal part is <em>how</em> it moves the item:</p>
 
-<pre><code><span class="cm">// Postfix on Inventory.AddItem — __instance is the OPEN chest's inventory</span>
+<pre><code><span class="cm">// Postfix on Inventory.AddItem - __instance is the OPEN chest's inventory</span>
 <span class="kw">if</span> (!__result) {                          <span class="cm">// open chest was full…</span>
     <span class="kw">if</span> (TryAddToNearBy(item)) { <span class="bad">__result = true;</span> }   <span class="cm">// …lie to the vanilla caller</span>
 } <span class="kw">else if</span> (__instance.CountItems(item.m_shared.m_name) == item.m_stack
@@ -246,28 +246,28 @@
     <span class="kw">if</span> (ok) { target.<span class="bad">Save()</span>; target.GetInventory().Changed(); }
     <span class="kw">return</span> ok;
 }</code></pre>
-<div class="code-cap">Trimmed decompiled source, SmartContainers.dll v1.7.0 — the entire "transfer engine"</div>
+<div class="code-cap">Trimmed decompiled source, SmartContainers.dll v1.7.0 - the entire "transfer engine"</div>
 
   <p>Grep of the full assembly confirms: <strong>zero occurrences of <code>IsOwner</code>, <code>ClaimOwnership</code>, or <code>SetOwner</code></strong>. It writes directly into chests it doesn't own.</p>
 
   <div class="grid2">
     <div class="f-card">
-      <h4>FLAW #1 — Writes to replicas</h4>
-      <p>Valheim chests are owner-authoritative. A non-owner's local <code>Inventory</code> is a read-only replica; writing to it changes nothing real. The write silently evaporates on the owner's next ZDO revision — but the <em>removal</em> from your side (player inventory / opened chest) IS authoritative. Item gone. The Feb-2023 network rewrite made revision semantics strict, turning "rare loss" into routine loss on dedicated servers.</p>
+      <h4>FLAW #1 - Writes to replicas</h4>
+      <p>Valheim chests are owner-authoritative. A non-owner's local <code>Inventory</code> is a read-only replica; writing to it changes nothing real. The write silently evaporates on the owner's next ZDO revision - but the <em>removal</em> from your side (player inventory / opened chest) IS authoritative. Item gone. The Feb-2023 network rewrite made revision semantics strict, turning "rare loss" into routine loss on dedicated servers.</p>
       <div class="fix">never touch a non-owned inventory; route every move through the owner (MultiUserChest RPC).</div>
     </div>
     <div class="f-card">
-      <h4>FLAW #2 — Forged success, no rollback</h4>
+      <h4>FLAW #2 - Forged success, no rollback</h4>
       <p>Setting <code>__result = true</code> tells vanilla code "the add worked", so vanilla unconditionally deletes the item from the source. When the remote add later proves phantom, there is nothing to roll back to.</p>
-      <div class="fix">no Harmony result-forging at all — we don't patch the insert path; we pull from a chest we own on a tick, transactionally.</div>
+      <div class="fix">no Harmony result-forging at all - we don't patch the insert path; we pull from a chest we own on a tick, transactionally.</div>
     </div>
     <div class="f-card">
-      <h4>FLAW #3 — Aliased ItemData object</h4>
+      <h4>FLAW #3 - Aliased ItemData object</h4>
       <p>The <em>same object instance</em> is inserted into the target while still referenced by the source; vanilla mutates <code>m_stack</code> during stack-merges. Against a stale replica this corrupts counts with no recovery.</p>
-      <div class="fix">full serialize-clone per move (MUC's <code>WriteItemToPackage</code> carries stack, quality, durability, customData — EpicLoot-safe).</div>
+      <div class="fix">full serialize-clone per move (MUC's <code>WriteItemToPackage</code> carries stack, quality, durability, customData - EpicLoot-safe).</div>
     </div>
     <div class="f-card">
-      <h4>FLAW #4 — "InUse" filter isn't safety</h4>
+      <h4>FLAW #4 - "InUse" filter isn't safety</h4>
       <p>Its only concurrency guard skips chests currently open in someone's UI. A closed chest owned by another peer passes the check and still gets a phantom write. Candidates aren't even distance-sorted (registration order).</p>
       <div class="fix">ownership-correct writes make concurrency safe by construction; candidates sorted by priority, then distance; wards (<code>CheckAccess</code>) respected.</div>
     </div>
@@ -282,10 +282,10 @@
 <!-- ================= 4 BUILDING BLOCKS ================= -->
 <section id="blocks">
   <h2><span class="num">04</span>Proven building blocks (MIT, free to reuse)</h2>
-  <p class="lead">Every risky mechanism our mod needs already ships in MSchmoecker's <strong>MultiUserChest</strong> (MUC) and <strong>ItemHopper</strong> — both MIT-licensed, actively maintained, and designed to be depended on (MUC changelog: <em>"synced non-player interactions on chests… the base for other mods"</em>).</p>
+  <p class="lead">Every risky mechanism our mod needs already ships in MSchmoecker's <strong>MultiUserChest</strong> (MUC) and <strong>ItemHopper</strong> - both MIT-licensed, actively maintained, and designed to be depended on (MUC changelog: <em>"synced non-player interactions on chests… the base for other mods"</em>).</p>
 
-  <h3>A. Safe cross-chest moves — MUC's extension API</h3>
-<pre><code><span class="cm">// MultiUserChest/ContainerHandler.cs — public API we call for every move</span>
+  <h3>A. Safe cross-chest moves - MUC's extension API</h3>
+<pre><code><span class="cm">// MultiUserChest/ContainerHandler.cs - public API we call for every move</span>
 <span class="kw">public static</span> <span class="ty">RequestChestAdd</span> AddItemToChest(<span class="kw">this</span> <span class="ty">Container</span> container, <span class="ty">ItemData</span> item,
     <span class="ty">Inventory</span> sourceInventory, <span class="ty">Vector2i</span> to, <span class="ty">ZDOID</span> sender, <span class="kw">int</span> dragAmount = -1)
 
@@ -295,10 +295,10 @@
 } <span class="kw">else</span> {
     GamePatches.<span class="good">InvokeRPC</span>(container.m_nview, ItemAddRPC, request); <span class="cm">// routed to ZDO owner</span>
 }
-<span class="cm">// owner executes, responds; rejected leftovers are re-added or dropped — never vanish</span></code></pre>
+<span class="cm">// owner executes, responds; rejected leftovers are re-added or dropped - never vanish</span></code></pre>
   <div class="code-cap">Transactional by design: block slot → request → owner executes → response heals the source. Undeliverable items drop to the ground rather than disappear.</div>
 
-  <h3>B. The tick loop — ItemHopper's owner-gated, staggered FixedUpdate</h3>
+  <h3>B. The tick loop - ItemHopper's owner-gated, staggered FixedUpdate</h3>
 <pre><code><span class="cm">// ValheimHopper/Logic/Hopper.cs</span>
 <span class="kw">private void</span> FixedUpdate() {
     <span class="kw">if</span> (!IsValid() || <span class="good">!zNetView.IsOwner()</span>) <span class="kw">return</span>;   <span class="cm">// only the ZDO owner simulates</span>
@@ -307,8 +307,8 @@
     <span class="kw">if</span> ((frame + frameOffset + 1) % objectSearchFrame == 0) FindIO();  <span class="cm">// re-scan every 3 s</span>
 }</code></pre>
 
-  <h3>C. Per-chest settings that save with the world — ZProperty pattern</h3>
-<pre><code><span class="cm">// ValheimHopper/Logic/ZProperty.cs — ZDO-backed property with owner-write RPC</span>
+  <h3>C. Per-chest settings that save with the world - ZProperty pattern</h3>
+<pre><code><span class="cm">// ValheimHopper/Logic/ZProperty.cs - ZDO-backed property with owner-write RPC</span>
 <span class="kw">public void</span> Set(<span class="ty">T</span> value) {
     <span class="kw">if</span> (NetView.IsValid() &amp;&amp; NetView.<span class="good">IsOwner()</span>) SetValue(value);   <span class="cm">// direct ZDO write</span>
     <span class="kw">else</span> NetView.<span class="good">InvokeRPC</span>(RPCName, value);                        <span class="cm">// ask the owner to write</span>
@@ -319,14 +319,14 @@
   <h3>D. Discovery, versioning, stacking</h3>
   <ul class="clean">
     <li><strong>Finding chests:</strong> <code>Physics.OverlapBoxNonAlloc</code> on the <code>piece</code> layers, dedup by ZDOID, cached 3 s. We swap in <code>OverlapSphereNonAlloc(pos, radius)</code> for a radius around the sorter.</li>
-    <li><strong>Version lock-step:</strong> Jötunn's <code>[NetworkCompatibility(EveryoneMustHaveMod, VersionStrictness.Minor)]</code> — mismatched clients can't connect. This is how we guarantee server + all clients run the same version.</li>
+    <li><strong>Version lock-step:</strong> Jötunn's <code>[NetworkCompatibility(EveryoneMustHaveMod, VersionStrictness.Minor)]</code> - mismatched clients can't connect. This is how we guarantee server + all clients run the same version.</li>
     <li><strong>Stack edge cases:</strong> MUC's <code>CanStack</code> (name + quality when upgradable), <code>ClampStackSize</code> via prefab cache (safe with stack-size mods), full <code>m_customData</code> serialization (EpicLoot-compatible).</li>
-    <li><strong>Opt-out flag:</strong> MUC honors a <code>MUC_Ignore</code> ZDO bool on containers — we set it appropriately and respect it in discovery.</li>
+    <li><strong>Opt-out flag:</strong> MUC honors a <code>MUC_Ignore</code> ZDO bool on containers - we set it appropriately and respect it in discovery.</li>
   </ul>
 
   <div class="callout green">
     <div class="ttl">Build vs. borrow decision</div>
-    We take a hard dependency on <strong>MultiUserChest</strong> (as ItemHopper does) instead of re-implementing RPC transfer plumbing — that's the single highest-risk subsystem, already solved, maintained, and MIT. Our code stays focused on what's new: sorter designation, routing rules, filters, and UI. Bonus: MUC also lets multiple players open the same chest, which your camp will love anyway.
+    We take a hard dependency on <strong>MultiUserChest</strong> (as ItemHopper does) instead of re-implementing RPC transfer plumbing - that's the single highest-risk subsystem, already solved, maintained, and MIT. Our code stays focused on what's new: sorter designation, routing rules, filters, and UI. Bonus: MUC also lets multiple players open the same chest, which your camp will love anyway.
   </div>
 </section>
 
@@ -348,7 +348,7 @@
 
     <!-- Band A: UI -->
     <rect class="band" x="15" y="28" width="950" height="94" rx="10"/>
-    <text class="band-lbl" x="30" y="48">CLIENT UI — HARMONY PATCHES ON InventoryGui</text>
+    <text class="band-lbl" x="30" y="48">CLIENT UI - HARMONY PATCHES ON InventoryGui</text>
     <rect class="b-purple" x="40" y="60" width="270" height="48" rx="8"/>
     <text class="t12" x="55" y="80">Sorter toggle button</text>
     <text class="t11" x="55" y="97">on chest GUI (clone m_takeAllButton)</text>
@@ -361,7 +361,7 @@
 
     <!-- Band B: core -->
     <rect class="band" x="15" y="152" width="950" height="230" rx="10"/>
-    <text class="band-lbl" x="30" y="172">SORTER CORE — NEW CODE (~1.5K LOC)</text>
+    <text class="band-lbl" x="30" y="172">SORTER CORE - NEW CODE (~1.5K LOC)</text>
     <rect class="b-gold" x="40" y="188" width="215" height="66" rx="8"/>
     <text class="t13" x="55" y="210">SorterBehaviour</text>
     <text class="t11" x="55" y="227">owner-gated FixedUpdate tick,</text>
@@ -390,7 +390,7 @@
 
     <!-- Band C: deps -->
     <rect class="band" x="15" y="412" width="950" height="92" rx="10"/>
-    <text class="band-lbl" x="30" y="432">FOUNDATION — MAINTAINED DEPENDENCIES</text>
+    <text class="band-lbl" x="30" y="432">FOUNDATION - MAINTAINED DEPENDENCIES</text>
     <rect class="b-blue" x="40" y="444" width="260" height="46" rx="8"/>
     <text class="t12" x="55" y="463">BepInEx 5.4.x + HarmonyX</text>
     <text class="t11" x="55" y="480">loader &amp; runtime patching</text>
@@ -403,7 +403,7 @@
 
     <!-- Band D: world -->
     <rect class="band" x="15" y="534" width="950" height="100" rx="10"/>
-    <text class="band-lbl" x="30" y="554">WORLD STATE — ZDO (SYNCS TO PEERS, SAVES WITH WORLD)</text>
+    <text class="band-lbl" x="30" y="554">WORLD STATE - ZDO (SYNCS TO PEERS, SAVES WITH WORLD)</text>
     <rect class="b-green" x="40" y="566" width="280" height="52" rx="8"/>
     <text class="t12" x="55" y="586">Sorter chest ZDO</text>
     <text class="t11" x="55" y="603">sorter_enabled · sorter_radius</text>
@@ -426,7 +426,7 @@
     <path class="arrow" d="M790 490 L790 566" marker-end="url(#arr)"/>
     <path class="arrow" d="M867 254 L520 566" marker-end="url(#arr)"/>
   </svg>
-  <div class="diag-cap">Fig. 1 — Component architecture. Gold = code we write; purple = thin UI patches; blue = dependencies; green = persisted world data.</div>
+  <div class="diag-cap">Fig. 1 - Component architecture. Gold = code we write; purple = thin UI patches; blue = dependencies; green = persisted world data.</div>
   </div>
 
   <h3>Component responsibilities</h3>
@@ -542,14 +542,14 @@
     <text class="t11" x="563" y="640">rejected → leftover self-heals to sorter</text>
     <path class="arrow" d="M660 550 L660 586" marker-end="url(#fa)"/>
   </svg>
-  <div class="diag-cap">Fig. 2 — Per-stack routing decision. Green path = happy path; the red terminal is the ONLY failure mode: the item just sits in the sorter.</div>
+  <div class="diag-cap">Fig. 2 - Per-stack routing decision. Green path = happy path; the red terminal is the ONLY failure mode: the item just sits in the sorter.</div>
   </div>
 
   <h3>Tie-breaking &amp; ordering rules</h3>
   <ul class="clean">
     <li><strong>Specificity wins:</strong> a chest that names the exact item beats a group chest, which beats a contains-match. Your "Stone" chest outranks a "Building materials" chest for stone.</li>
-    <li><strong>Priority number:</strong> each target chest has a user-settable priority (default 0); higher wins within the same specificity tier — lets you make an overflow chest that only fills when the main one is full.</li>
-    <li><strong>Distance last:</strong> equal specificity + priority → nearest chest wins (Smarter Containers used registration order — a subtle bug we fix).</li>
+    <li><strong>Priority number:</strong> each target chest has a user-settable priority (default 0); higher wins within the same specificity tier - lets you make an overflow chest that only fills when the main one is full.</li>
+    <li><strong>Distance last:</strong> equal specificity + priority → nearest chest wins (Smarter Containers used registration order - a subtle bug we fix).</li>
     <li><strong>Stack-splitting:</strong> if the best target has partial room, we fill it and route the remainder to the next candidate (MUC clamps stacks safely).</li>
     <li><strong>Sorter chaining is prevented:</strong> sorters are never targets, so no infinite loops between two sorters.</li>
   </ul>
@@ -557,7 +557,7 @@
 
 <!-- ================= 7 NETWORKING ================= -->
 <section id="network">
-  <h2><span class="num">07</span>Networking model — the part that killed Smarter Containers, solved</h2>
+  <h2><span class="num">07</span>Networking model - the part that killed Smarter Containers, solved</h2>
   <p>Rule zero of Valheim modding: <strong>only the ZDO owner may mutate an object</strong>, and chest ownership floats between players (vanilla hands a chest's ZDO to whoever opens it; zones are simulated by the nearest client, not the server). Our engine is built around that reality:</p>
 
   <div class="diagram">
@@ -589,7 +589,7 @@
     <!-- step 1 -->
     <rect class="b" x="55" y="100" width="190" height="46" rx="8"/>
     <text class="t12" x="68" y="119">1 · Dump inventory</text>
-    <text class="t11" x="68" y="135">into sorter (you own it — safe)</text>
+    <text class="t11" x="68" y="135">into sorter (you own it - safe)</text>
 
     <!-- step 2 -->
     <rect class="b" x="55" y="170" width="190" height="46" rx="8"/>
@@ -618,7 +618,7 @@
     <!-- step 7 -->
     <rect class="b-green" x="55" y="446" width="190" height="52" rx="8"/>
     <text class="t12" x="68" y="466">7 · Self-heal: unblock;</text>
-    <text class="t11" x="68" y="482">any leftover re-enters sorter —</text>
+    <text class="t11" x="68" y="482">any leftover re-enters sorter  - </text>
     <text class="t11" x="68" y="494">zero-loss invariant</text>
 
     <!-- step 8 arrow -->
@@ -630,17 +630,17 @@
 
     <!-- note -->
     <rect class="band" x="55" y="524" width="880" height="46" rx="9"/>
-    <text class="t11" x="72" y="543">Note: if the target's owner IS you (common in solo/loaded-by-you zones), step 4–6 collapse into a direct local call — same code path, zero RPC.</text>
-    <text class="t11" x="72" y="559">Sorting runs whenever the base is loaded by any player with the mod — which is exactly when someone is there dumping loot.</text>
+    <text class="t11" x="72" y="543">Note: if the target's owner IS you (common in solo/loaded-by-you zones), step 4–6 collapse into a direct local call - same code path, zero RPC.</text>
+    <text class="t11" x="72" y="559">Sorting runs whenever the base is loaded by any player with the mod - which is exactly when someone is there dumping loot.</text>
   </svg>
-  <div class="diag-cap">Fig. 3 — One transfer, end to end. Contrast with Smarter Containers: it performed step 5 locally on a replica and skipped steps 4, 6, 7 entirely.</div>
+  <div class="diag-cap">Fig. 3 - One transfer, end to end. Contrast with Smarter Containers: it performed step 5 locally on a replica and skipped steps 4, 6, 7 entirely.</div>
   </div>
 
   <h3>Install topology</h3>
   <table>
     <tr><th>Where</th><th>Required?</th><th>Why</th></tr>
     <tr><td>Dedicated server (AMP)</td><td><span class="pill gold">YES</span></td><td>Hosts version handshake; runs sorting when it owns zones; syncs authoritative config to clients</td></tr>
-    <tr><td>Every player's client</td><td><span class="pill gold">YES</span></td><td>Clients own &amp; simulate chests near them; Jötunn's <code>NetworkCompatibility</code> refuses mismatched/missing installs — protecting the no-loss invariant</td></tr>
+    <tr><td>Every player's client</td><td><span class="pill gold">YES</span></td><td>Clients own &amp; simulate chests near them; Jötunn's <code>NetworkCompatibility</code> refuses mismatched/missing installs - protecting the no-loss invariant</td></tr>
     <tr><td>Xbox / crossplay players</td><td><span class="pill red">IMPOSSIBLE</span></td><td>Consoles can't load BepInEx; server must run with crossplay off (Steam networking)</td></tr>
   </table>
 </section>
@@ -649,19 +649,19 @@
 <section id="data">
   <h2><span class="num">08</span>Data model &amp; configuration</h2>
 
-  <h3>Per-chest state — stored in the chest's own ZDO <span class="pill blue">syncs + saves automatically</span></h3>
+  <h3>Per-chest state - stored in the chest's own ZDO <span class="pill blue">syncs + saves automatically</span></h3>
   <table>
     <tr><th>Key</th><th>Type</th><th>On</th><th>Meaning</th></tr>
     <tr><td><code>psort_sorter</code></td><td>bool</td><td>Sorter chest</td><td>This chest is an input/dump chest</td></tr>
     <tr><td><code>psort_radius</code></td><td>float</td><td>Sorter chest</td><td>Optional per-sorter radius override (else global default)</td></tr>
-    <tr><td><code>psort_items</code></td><td>string (CSV of stable hashes)</td><td>Target chest</td><td>Explicit item filters — prefab-name hashes, rename-proof</td></tr>
+    <tr><td><code>psort_items</code></td><td>string (CSV of stable hashes)</td><td>Target chest</td><td>Explicit item filters - prefab-name hashes, rename-proof</td></tr>
     <tr><td><code>psort_groups</code></td><td>string (CSV of group ids)</td><td>Target chest</td><td>Group filters, e.g. <code>cooking,ores</code></td></tr>
     <tr><td><code>psort_priority</code></td><td>int (default 0)</td><td>Target chest</td><td>Tie-breaker within a specificity tier; enables overflow chests</td></tr>
     <tr><td><code>psort_optout</code></td><td>bool</td><td>Any chest</td><td>Exclude from contains-fallback (personal chests stay private)</td></tr>
   </table>
-  <p>All writes go through the <strong>ZProperty owner-write pattern</strong> (direct if owner, RPC to owner otherwise) — the same discipline as the item moves.</p>
+  <p>All writes go through the <strong>ZProperty owner-write pattern</strong> (direct if owner, RPC to owner otherwise) - the same discipline as the item moves.</p>
 
-  <h3>Server-synced settings — BepInEx cfg, locked by the server</h3>
+  <h3>Server-synced settings - BepInEx cfg, locked by the server</h3>
   <table>
     <tr><th>Setting</th><th>Default</th><th>Notes</th></tr>
     <tr><td><code>DefaultRadius</code></td><td>20 m (clamp 5–60)</td><td>Sphere around each sorter (SC used 14 around the player)</td></tr>
@@ -672,7 +672,7 @@
     <tr><td><code>HudToasts / ChestVfx</code></td><td>on</td><td>Feedback: “12 × Stone → Masonry chest”</td></tr>
   </table>
 
-  <h3>Item groups — shipped defaults, user-extendable, server-synced</h3>
+  <h3>Item groups - shipped defaults, user-extendable, server-synced</h3>
   <p><span class="pill grey">ores &amp; metals</span> <span class="pill grey">stone &amp; building</span> <span class="pill grey">wood</span> <span class="pill grey">cooking (veg · berries · mushrooms · meat)</span> <span class="pill grey">meads &amp; potions</span> <span class="pill grey">seeds</span> <span class="pill grey">trophies</span> <span class="pill grey">valuables</span> <span class="pill grey">ammo</span> <span class="pill grey">hides &amp; scraps</span></p>
   <p>Groups resolve to prefab-hash sets at load (Jötunn prefab cache), so modded items can be added to groups by name in the YAML. Smarter Containers' normalization trick (<code>$item_</code>-strip + lowercase) is kept for robust name matching.</p>
 </section>
@@ -682,17 +682,17 @@
   <h2><span class="num">09</span>Player-facing design</h2>
   <div class="grid2">
     <div class="v-card">
-      <div class="label">On any chest GUI — one new button</div>
+      <div class="label">On any chest GUI - one new button</div>
       <div style="margin-top:12px;background:var(--code-bg);border:1px solid var(--line);border-radius:8px;padding:14px;font-family:var(--mono);font-size:13px">
         <div style="color:var(--muted)">┌ Reinforced chest ─────────────┐</div>
         <div>│  [Take All]  <span style="color:var(--gold)">[⇄ Sorter: ON]</span>   │</div>
         <div style="color:var(--muted)">│  …inventory grid…             │</div>
         <div style="color:var(--muted)">└───────────────────────────────┘</div>
       </div>
-      <p style="font-size:13.5px;color:var(--muted);margin-top:10px">Toggle any chest into a Sorter. Its contents start draining to filtered chests immediately. Cloned from <code>m_takeAllButton</code> — the exact technique SC used, so we know it survives GUI updates.</p>
+      <p style="font-size:13.5px;color:var(--muted);margin-top:10px">Toggle any chest into a Sorter. Its contents start draining to filtered chests immediately. Cloned from <code>m_takeAllButton</code> - the exact technique SC used, so we know it survives GUI updates.</p>
     </div>
     <div class="v-card">
-      <div class="label">On target chests — filter controls</div>
+      <div class="label">On target chests - filter controls</div>
       <div style="margin-top:12px;background:var(--code-bg);border:1px solid var(--line);border-radius:8px;padding:14px;font-family:var(--mono);font-size:13px">
         <div style="color:var(--muted)">┌ Filters ──────────────────────┐</div>
         <div>│ groups: <span style="color:var(--green)">[cooking ✓] [seeds ✓]</span> │</div>
@@ -700,15 +700,15 @@
         <div>│ <span style="color:var(--gold)">[📌 Pin current contents]</span>  ⬆0 │</div>
         <div style="color:var(--muted)">└───────────────────────────────┘</div>
       </div>
-      <p style="font-size:13.5px;color:var(--muted);margin-top:10px"><strong>“Pin current contents”</strong> is the killer shortcut: put a sample of what belongs in the chest, click once — every item type inside becomes an explicit filter. Zero menu digging for the common case.</p>
+      <p style="font-size:13.5px;color:var(--muted);margin-top:10px"><strong>“Pin current contents”</strong> is the killer shortcut: put a sample of what belongs in the chest, click once - every item type inside becomes an explicit filter. Zero menu digging for the common case.</p>
     </div>
   </div>
-  <p>Day-one usability without opening a single menu: thanks to the <strong>contains-fallback</strong>, an unconfigured base already routes items to chests that hold them — Smarter Containers behavior, minus the item loss. Filters and groups refine from there.</p>
+  <p>Day-one usability without opening a single menu: thanks to the <strong>contains-fallback</strong>, an unconfigured base already routes items to chests that hold them - Smarter Containers behavior, minus the item loss. Filters and groups refine from there.</p>
 </section>
 
 <!-- ================= 10 ROADMAP ================= -->
 <section id="roadmap">
-  <h2><span class="num">10</span>Roadmap — 8–11 dev days to server-ready</h2>
+  <h2><span class="num">10</span>Roadmap - 8–11 dev days to server-ready</h2>
 
   <div class="diagram">
   <svg viewBox="0 0 980 400" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Roadmap gantt chart">
@@ -758,14 +758,14 @@
       <text class="t11" x="860" y="368" fill="#d9a441">M3 live on your AMP server</text>
     </g>
   </svg>
-  <div class="diag-cap">Fig. 4 — Expected timeline (solid = expected; range 8–11 days total). Milestones M1–M3 are hard checkpoints.</div>
+  <div class="diag-cap">Fig. 4 - Expected timeline (solid = expected; range 8–11 days total). Milestones M1–M3 are hard checkpoints.</div>
   </div>
 
   <h3>Phase contents</h3>
   <table>
     <tr><th style="width:24%">Phase</th><th>Deliverables</th><th class="c">Exit criterion</th></tr>
     <tr><td><strong>P0 · Environment</strong> (½–1d)</td><td>Solution scaffold; publicized game assemblies (BepInEx.AssemblyPublicizer); ILSpy reference dump; Jötunn + MUC referenced; local dedicated server + 2 test clients.</td><td class="c">Hello-world plugin loads on client &amp; server</td></tr>
-    <tr><td><strong>P1 · MVP engine</strong> (2–3d)</td><td>Sorter toggle (ZDO bool + GUI button); SorterBehaviour owner-gated tick; TargetRegistry discovery; contains-fallback routing; MUC-backed TransferService.</td><td class="c"><strong>M1:</strong> dump a full inventory, watch it distribute — no loss after 500-item soak</td></tr>
+    <tr><td><strong>P1 · MVP engine</strong> (2–3d)</td><td>Sorter toggle (ZDO bool + GUI button); SorterBehaviour owner-gated tick; TargetRegistry discovery; contains-fallback routing; MUC-backed TransferService.</td><td class="c"><strong>M1:</strong> dump a full inventory, watch it distribute - no loss after 500-item soak</td></tr>
     <tr><td><strong>P2 · Filters &amp; groups</strong> (2–3d)</td><td>FilterStore ZDO props; groups config + server sync; specificity tiers + priority; filter panel UI; “Pin current contents”.</td><td class="c"><strong>M2:</strong> stone→stone chest, carrot→cooking chest via explicit config</td></tr>
     <tr><td><strong>P3 · Polish</strong> (1–2d)</td><td>HUD toasts, chest VFX/SFX, gamepad hints; stack splitting; full-chest cooldown; profiling against 150-chest base; edge cases (quality items, EpicLoot customData passthrough).</td><td class="c">&lt;0.5 ms median tick cost on loaded base</td></tr>
     <tr><td><strong>P4 · Soak + deploy</strong> (1–2d)</td><td>Version gate; 3-player dupe-hunt matrix (simultaneous dump/withdraw/reload); AMP install; config lock; player install guide.</td><td class="c"><strong>M3:</strong> a week of real play, zero item-loss reports</td></tr>
@@ -778,14 +778,14 @@
   <table>
     <tr><th>Risk</th><th class="c">Likelihood</th><th class="c">Impact</th><th>Mitigation</th></tr>
     <tr>
-      <td><strong>Valheim 1.0 “Deep North” lands Sept 9, 2026</strong> with an engine/networking pass — historical precedent says mods break</td>
+      <td><strong>Valheim 1.0 “Deep North” lands Sept 9, 2026</strong> with an engine/networking pass - historical precedent says mods break</td>
       <td class="c"><span class="pill red">HIGH</span></td><td class="c"><span class="pill red">HIGH</span></td>
       <td>Build now, enjoy the summer; budget a patch sprint mid-September. Pin the server via AMP's <code>default_old</code> branch until BepInEx/Jötunn/MUC update (they historically follow within days–weeks). Our thin-patch design (almost no Harmony patches on game internals) minimizes surface area.</td>
     </tr>
     <tr>
       <td>MUC dependency goes unmaintained</td>
       <td class="c"><span class="pill gold">LOW</span></td><td class="c"><span class="pill red">HIGH</span></td>
-      <td>MIT license — we can vendor/fork the ~4 files we use. Actively maintained today.</td>
+      <td>MIT license - we can vendor/fork the ~4 files we use. Actively maintained today.</td>
     </tr>
     <tr>
       <td>Ownership races / duplication bugs</td>
@@ -795,7 +795,7 @@
     <tr>
       <td>Performance on mega-bases (200+ chests)</td>
       <td class="c"><span class="pill gold">MED</span></td><td class="c"><span class="pill gold">MED</span></td>
-      <td>3 s discovery cache, staggered ticks, stacks/tick budget, full-chest cooldown, non-alloc physics queries. Only sorters tick — normal chests cost zero.</td>
+      <td>3 s discovery cache, staggered ticks, stacks/tick budget, full-chest cooldown, non-alloc physics queries. Only sorters tick - normal chests cost zero.</td>
     </tr>
     <tr>
       <td>Conflicts with other inventory mods</td>
@@ -805,7 +805,7 @@
     <tr>
       <td>Sorting pauses when no player is near the base</td>
       <td class="c"><span class="pill blue">CERTAIN</span></td><td class="c"><span class="pill green">LOW</span></td>
-      <td>Engine-level (Valheim unloads empty zones). Matches the use case — you dump loot while standing there. Documented for players.</td>
+      <td>Engine-level (Valheim unloads empty zones). Matches the use case - you dump loot while standing there. Documented for players.</td>
     </tr>
   </table>
 </section>
@@ -813,14 +813,14 @@
 <!-- ================= 12 DEPLOY ================= -->
 <section id="deploy">
   <h2><span class="num">12</span>Deployment on your AMP server</h2>
-  <p>AMP's Valheim template has native BepInEx support — no manual Doorstop wrangling.</p>
+  <p>AMP's Valheim template has native BepInEx support - no manual Doorstop wrangling.</p>
   <table>
     <tr><th class="c" style="width:8%">Step</th><th>Action</th></tr>
     <tr><td class="c">1</td><td>AMP instance → <strong>Configuration → search “BepInEx”</strong> → enable <strong>Install BepInEx</strong> → run <strong>Update</strong>. AMP downloads denikson's BepInExPack and sets all Doorstop env vars itself. (Don't combine with the “Install Valheim Plus” option.)</td></tr>
     <tr><td class="c">2</td><td><strong>Disable crossplay</strong> (uncheck Enable Crossplay → Steam networking). Required for modded play; Xbox/Game Pass players can't join modded servers regardless.</td></tr>
     <tr><td class="c">3</td><td>Upload DLLs via AMP <strong>File Manager</strong> to <code>Valheim/896660/BepInEx/plugins/</code>: <code>Jotunn.dll</code>, <code>MultiUserChest.dll</code>, <code>ProjectSorter.dll</code>.</td></tr>
-    <tr><td class="c">4</td><td>Start server → verify <code>BepInEx/LogOutput.log</code> shows all three plugins loading; tune generated configs in <code>BepInEx/config/</code> (server values win — synced to clients).</td></tr>
-    <tr><td class="c">5</td><td><strong>Players:</strong> one-click install via a shared r2modman/Thunderstore modpack code (pins exact versions). Anyone missing it or version-mismatched is refused at connect — by design.</td></tr>
+    <tr><td class="c">4</td><td>Start server → verify <code>BepInEx/LogOutput.log</code> shows all three plugins loading; tune generated configs in <code>BepInEx/config/</code> (server values win - synced to clients).</td></tr>
+    <tr><td class="c">5</td><td><strong>Players:</strong> one-click install via a shared r2modman/Thunderstore modpack code (pins exact versions). Anyone missing it or version-mismatched is refused at connect - by design.</td></tr>
     <tr><td class="c">6</td><td><strong>Update hygiene:</strong> leave Install BepInEx on (it re-applies each update; <code>plugins/</code> and <code>config/</code> survive). Add a backup trigger before updates. If a game patch breaks mods: switch Server Branch to <code>default_old</code> until the mod stack catches up.</td></tr>
   </table>
 </section>
@@ -831,10 +831,10 @@
   <table>
     <tr><th>#</th><th>Decision</th><th>Recommendation</th></tr>
     <tr><td>D1</td><td>Sorter designation: toggle on any vanilla chest vs. a custom craftable “Sorter Chest” piece</td><td><strong>Toggle</strong> for v1 (zero new assets, works with existing bases); custom piece is P5 flair</td></tr>
-    <tr><td>D2</td><td>Contains-fallback default</td><td><strong>ON</strong> — instant gratification with zero setup; personal chests can opt out</td></tr>
-    <tr><td>D3</td><td>Route non-stackables (armor, tools)?</td><td><strong>OFF</strong> by default — avoids surprise, dodges the trickiest item-fidelity cases in v1</td></tr>
+    <tr><td>D2</td><td>Contains-fallback default</td><td><strong>ON</strong> - instant gratification with zero setup; personal chests can opt out</td></tr>
+    <tr><td>D3</td><td>Route non-stackables (armor, tools)?</td><td><strong>OFF</strong> by default - avoids surprise, dodges the trickiest item-fidelity cases in v1</td></tr>
     <tr><td>D4</td><td>Private mod for your server vs. Thunderstore release</td><td>Build private-first; publishing is a P5 packaging task, not an architecture change</td></tr>
-    <tr><td>D5</td><td>Start now vs. wait for Valheim 1.0 (Sept 9)</td><td><strong>Start now</strong> — a summer of use is worth one patch sprint; the design deliberately minimizes breakable surface</td></tr>
+    <tr><td>D5</td><td>Start now vs. wait for Valheim 1.0 (Sept 9)</td><td><strong>Start now</strong> - a summer of use is worth one patch sprint; the design deliberately minimizes breakable surface</td></tr>
   </table>
 </section>
 
@@ -842,13 +842,13 @@
 <section id="sources">
   <h2><span class="num">14</span>Sources &amp; references</h2>
   <ul class="clean" style="font-size:14px">
-    <li>SmarterContainers decompiled source (v1.7.0) — <a href="https://old.thunderstore.io/c/valheim/p/Roses/SmarterContainers/source/">Thunderstore decompiler</a> · <a href="https://www.nexusmods.com/valheim/mods/332">Nexus #332</a></li>
-    <li>ValheimHopper (MIT) — <a href="https://github.com/MSchmoecker/ValheimHopper">GitHub</a> · <a href="https://thunderstore.io/c/valheim/p/MSchmoecker/ItemHopper/">Thunderstore</a> — Hopper.cs tick, ZProperty.cs, HopperHelper.cs discovery</li>
-    <li>MultiUserChest (MIT) — <a href="https://github.com/MSchmoecker/No-Chest-Block">GitHub</a> · <a href="https://thunderstore.io/c/valheim/p/MSchmoecker/MultiUserChest/">Thunderstore</a> — ContainerHandler.cs API, InventoryHelper.cs stacking</li>
-    <li>AzuAutoStore — <a href="https://thunderstore.io/c/valheim/p/Azumatt/AzuAutoStore/">Thunderstore</a> · <a href="https://github.com/AzumattDev/AzuAutoStore">GitHub</a> (ownership-claim + YAML filter reference)</li>
-    <li>Jötunn (JVL) — <a href="https://valheim-modding.github.io/Jotunn/">docs</a> — NetworkCompatibility, synced config, prefab cache</li>
-    <li>AMP Valheim template — <a href="https://github.com/CubeCoders/AMPTemplates/blob/main/valheimconfig.json">valheimconfig.json</a> · <a href="https://discourse.cubecoders.com/t/customization-with-valheim-im-having-trouble-installing-bepinex-along-with-the-mods/29838">CubeCoders discourse: BepInEx</a></li>
-    <li>Valheim 1.0 release date (Sept 9, 2026) — <a href="https://valheim.com/support/valheim-1-0-faq/">official 1.0 FAQ</a></li>
+    <li>SmarterContainers decompiled source (v1.7.0) - <a href="https://old.thunderstore.io/c/valheim/p/Roses/SmarterContainers/source/">Thunderstore decompiler</a> · <a href="https://www.nexusmods.com/valheim/mods/332">Nexus #332</a></li>
+    <li>ValheimHopper (MIT) - <a href="https://github.com/MSchmoecker/ValheimHopper">GitHub</a> · <a href="https://thunderstore.io/c/valheim/p/MSchmoecker/ItemHopper/">Thunderstore</a> - Hopper.cs tick, ZProperty.cs, HopperHelper.cs discovery</li>
+    <li>MultiUserChest (MIT) - <a href="https://github.com/MSchmoecker/No-Chest-Block">GitHub</a> · <a href="https://thunderstore.io/c/valheim/p/MSchmoecker/MultiUserChest/">Thunderstore</a> - ContainerHandler.cs API, InventoryHelper.cs stacking</li>
+    <li>AzuAutoStore - <a href="https://thunderstore.io/c/valheim/p/Azumatt/AzuAutoStore/">Thunderstore</a> · <a href="https://github.com/AzumattDev/AzuAutoStore">GitHub</a> (ownership-claim + YAML filter reference)</li>
+    <li>Jötunn (JVL) - <a href="https://valheim-modding.github.io/Jotunn/">docs</a> - NetworkCompatibility, synced config, prefab cache</li>
+    <li>AMP Valheim template - <a href="https://github.com/CubeCoders/AMPTemplates/blob/main/valheimconfig.json">valheimconfig.json</a> · <a href="https://discourse.cubecoders.com/t/customization-with-valheim-im-having-trouble-installing-bepinex-along-with-the-mods/29838">CubeCoders discourse: BepInEx</a></li>
+    <li>Valheim 1.0 release date (Sept 9, 2026) - <a href="https://valheim.com/support/valheim-1-0-faq/">official 1.0 FAQ</a></li>
   </ul>
 </section>
 

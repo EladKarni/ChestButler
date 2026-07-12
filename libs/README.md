@@ -1,7 +1,7 @@
-# /libs — modding-stack DLLs (you copy these in once)
+# /libs - modding-stack DLLs (you copy these in once)
 
 The build references these DLLs but they aren't committed (licenses/size). Source them from
-your own client install — you need these mods installed to playtest anyway.
+your own client install - you need these mods installed to playtest anyway.
 
 Easiest route (r2modman or Thunderstore App):
 
@@ -18,6 +18,6 @@ Easiest route (r2modman or Thunderstore App):
 | `Jotunn.dll` | `BepInEx/plugins/ValheimModding-Jotunn/Jotunn.dll` |
 | `MultiUserChest.dll` | `BepInEx/plugins/MSchmoecker-MultiUserChest/MultiUserChest.dll` |
 
-(Manual BepInEx install works too — same files, `BepInEx/core` + `BepInEx/plugins` in the game folder.)
+(Manual BepInEx install works too - same files, `BepInEx/core` + `BepInEx/plugins` in the game folder.)
 
 Only `BepInEx.dll` is needed for the P0 smoke build; the other three become required in P1.

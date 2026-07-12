@@ -7,7 +7,7 @@ namespace ChestButler.Core
     /// <summary>On-demand restock: pulls items matching the destination chest's saved
     /// filters (pins + sign labels) from nearby storage. Per click, each matching item
     /// type moves up to ONE full stack (non-stackables: one item), richest source first.
-    /// Pulls from ANY accessible chest in range — manual click is the only trigger.</summary>
+    /// Pulls from ANY accessible chest in range - manual click is the only trigger.</summary>
     internal static class Puller
     {
         internal static void PullInto(Container dest, out int movedTotal, out int typesMoved)

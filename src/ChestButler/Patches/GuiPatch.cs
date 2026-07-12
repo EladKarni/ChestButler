@@ -97,7 +97,7 @@ namespace ChestButler.Patches
             if (_current == null) return;
             bool now = !SorterZdo.IsSorter(_current);
             SorterZdo.SetSorter(_current, now);
-            Msg(now ? "Sorter enabled — items will be distributed when closed" : "Sorter disabled");
+            Msg(now ? "Sorter enabled - items will be distributed when closed" : "Sorter disabled");
             Refresh();
         }
 
@@ -113,17 +113,17 @@ namespace ChestButler.Patches
                 {
                     Filters.SetManual(_current, false);
                     var names = Filters.GetPinned(_current);
-                    Msg($"Pinned: {string.Join(", ", names)} — auto-fill ON");
+                    Msg($"Pinned: {string.Join(", ", names)} - auto-fill ON");
                     Plugin.Log.LogInfo($"[pin] {string.Join(", ", names)}");
                 }
-                else Msg("Chest is empty — add sample items first");
+                else Msg("Chest is empty - add sample items first");
             }
             else
             {
                 bool manual = !Filters.GetManual(_current);   // pure toggle, pins untouched
                 Filters.SetManual(_current, manual);
-                Msg(manual ? "Auto-fill OFF — fills only via Pull"
-                           : "Auto-fill ON — sorter routes here automatically");
+                Msg(manual ? "Auto-fill OFF - fills only via Pull"
+                           : "Auto-fill ON - sorter routes here automatically");
             }
             Refresh();
         }
