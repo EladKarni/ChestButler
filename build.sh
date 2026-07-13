@@ -47,4 +47,16 @@ if [ -n "$PLUGINS" ]; then
     cp dist/ChestButler.dll "$PLUGINS/" && echo "-> installed to profile plugins (loose)"
   fi
 fi
+
+# Thunderstore Mod Manager / r2modman deploy mods from their CACHE and overwrite a hand-copied
+# profile DLL on launch. Sync the cached copies too so the freshly built DLL actually loads
+# (the manager's displayed version label stays cosmetic; verify by the in-game "loaded" log line).
+for TMM in \
+  "$HOME/AppData/Roaming/Thunderstore Mod Manager/DataFolder/Valheim" \
+  "$HOME/AppData/Roaming/r2modmanPlus-local/Valheim" ; do
+  CACHE="$TMM/cache/EK_Solutions-ChestButler"
+  if [ -d "$CACHE" ]; then
+    find "$CACHE" -name "ChestButler.dll" -exec cp dist/ChestButler.dll {} \; -exec echo "-> synced manager cache: {}" \;
+  fi
+done
 echo "-> dist/ChestButler.dll"
