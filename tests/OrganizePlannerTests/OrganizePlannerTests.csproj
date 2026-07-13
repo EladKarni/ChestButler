@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Pure-logic test for Core/OrganizePlanner.cs. Links the REAL planner source (no copy) and
+       pulls in NO packages, so it runs fully offline with `dotnet run`. The planner has zero Unity
+       or BepInEx dependencies by design (affinity/capacity are injected as delegates), which is
+       exactly what makes this test possible without the game. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <AssemblyName>OrganizePlannerTests</AssemblyName>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="Program.cs" />
+    <Compile Include="../../src/ChestButler/Core/OrganizePlanner.cs" Link="OrganizePlanner.cs" />
+  </ItemGroup>
+
+</Project>

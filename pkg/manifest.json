@@ -1,6 +1,6 @@
 {
   "name": "ChestButler",
-  "version_number": "1.0.2",
+  "version_number": "1.1.0",
   "website_url": "",
   "description": "Dump-and-sort chests: flag any chest as a Sorter and your loot flies to the right chests. Pin filters, priorities, and a Pull button to restock. Multiplayer-safe via MultiUserChest.",
   "dependencies": [

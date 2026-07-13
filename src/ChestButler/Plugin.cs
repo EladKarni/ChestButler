@@ -17,18 +17,21 @@ namespace ChestButler
     {
         public const string ModGuid = "eksolutions.chestbutler";
         public const string ModName = "ChestButler";
-        public const string ModVersion = "1.0.2";
+        public const string ModVersion = "1.1.0";
 
+        internal static Plugin Instance;          // for StartCoroutine (Organize execution)
         internal static ManualLogSource Log;
         internal static ConfigEntry<float> SorterRadius;
         internal static ConfigEntry<float> TransferInterval;
         internal static ConfigEntry<int> StacksPerTick;
         internal static ConfigEntry<bool> ContainsFallback;
+        internal static ConfigEntry<int> OrganizeMovesPerTick;
 
         private Harmony _harmony;
 
         private void Awake()
         {
+            Instance = this;
             Log = Logger;
 
             SorterRadius = Config.Bind("Sorting", "Radius", 20f,
@@ -50,7 +53,13 @@ namespace ChestButler
                 new ConfigDescription("Route items to chests that already contain them when no explicit filter matches.",
                     null, new ConfigurationManagerAttributes { IsAdminOnly = true }));
 
+            OrganizeMovesPerTick = Config.Bind("Organize", "MovesPerTick", 4,
+                new ConfigDescription("How many item moves the Organize sweep performs per frame (higher = faster, more hitch).",
+                    new AcceptableValueRange<int>(1, 16),
+                    new ConfigurationManagerAttributes { IsAdminOnly = true }));
+
             Groups.Init(Config);
+            Stations.Init(Config);
 
             _harmony = new Harmony(ModGuid);
             _harmony.PatchAll();

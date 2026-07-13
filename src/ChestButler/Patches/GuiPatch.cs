@@ -6,19 +6,28 @@ using UnityEngine.UI;
 
 namespace ChestButler.Patches
 {
-    /// <summary>Chest-UI toolbar: [Sorter][Pin][Clear][Pull] in a HorizontalLayoutGroup,
-    /// styled from the vanilla Take All button and anchored to the panel's bottom-left corner.</summary>
+    /// <summary>Chest-UI toolbar: [Sorter][Pin][Clear][Pull] for normal chests, or [Sorter][Organize]
+    /// for sorter chests, in a HorizontalLayoutGroup styled from the vanilla Take All button and
+    /// anchored to the panel's bottom-left corner.</summary>
     [HarmonyPatch(typeof(InventoryGui))]
     internal static class GuiPatch
     {
         private static RectTransform _bar;
-        private static Button _sorterBtn, _pinBtn, _clearBtn, _pullBtn;
-        private static TMP_Text _sorterLabel, _pinLabel, _clearLabel, _pullLabel;
+        private static Button _sorterBtn, _pinBtn, _clearBtn, _pullBtn, _organizeBtn;
+        private static TMP_Text _sorterLabel, _pinLabel, _clearLabel, _pullLabel, _organizeLabel;
         private static Container _current;
+
+        // Organize preview-then-confirm: first press builds+previews a plan, a second press on the
+        // same chest within the window executes it. Any close / different chest / timeout cancels.
+        private const float ConfirmWindow = 5f;
+        private static OrganizePlan _pendingPlan;
+        private static Container _pendingChest;
+        private static float _pendingAt;
 
         [HarmonyPostfix, HarmonyPatch("Show")]
         private static void ShowPostfix(InventoryGui __instance, Container container)
         {
+            if (container != _pendingChest) ClearPending();   // opening a different chest cancels a pending Organize
             _current = container;
             EnsureBar(__instance);
             Refresh();
@@ -28,6 +37,7 @@ namespace ChestButler.Patches
         private static void HidePostfix()
         {
             _current = null;
+            ClearPending();
             if (_bar != null) _bar.gameObject.SetActive(false);
         }
 
@@ -75,10 +85,11 @@ namespace ChestButler.Patches
             fitter.horizontalFit = ContentSizeFitter.FitMode.PreferredSize;
             fitter.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
 
-            _sorterBtn = MakeButton(takeAll, "psort_toggle", OnSorterClick, out _sorterLabel);
-            _pinBtn    = MakeButton(takeAll, "psort_pin",    OnPinClick,    out _pinLabel);
-            _clearBtn  = MakeButton(takeAll, "psort_clear",  OnClearClick,  out _clearLabel);
-            _pullBtn   = MakeButton(takeAll, "psort_pull",   OnPullClick,   out _pullLabel);
+            _sorterBtn   = MakeButton(takeAll, "psort_toggle",   OnSorterClick,   out _sorterLabel);
+            _pinBtn      = MakeButton(takeAll, "psort_pin",      OnPinClick,      out _pinLabel);
+            _clearBtn    = MakeButton(takeAll, "psort_clear",    OnClearClick,    out _clearLabel);
+            _pullBtn     = MakeButton(takeAll, "psort_pull",     OnPullClick,     out _pullLabel);
+            _organizeBtn = MakeButton(takeAll, "psort_organize", OnOrganizeClick, out _organizeLabel);
         }
 
         private static Button MakeButton(Button template, string name,
@@ -118,6 +129,7 @@ namespace ChestButler.Patches
             if (_current == null) return;
             bool now = !SorterZdo.IsSorter(_current);
             SorterZdo.SetSorter(_current, now);
+            ClearPending();
             Msg(now ? "Sorter enabled. Contents distribute when the chest is closed" : "Sorter disabled");
             Refresh();
         }
@@ -167,6 +179,43 @@ namespace ChestButler.Patches
                 : "Nothing to pull from nearby chests");
         }
 
+        private static void OnOrganizeClick()
+        {
+            if (_current == null) return;
+
+            // second press on the same chest within the window -> execute the previewed plan
+            if (_pendingPlan != null && _pendingChest == _current && Time.time - _pendingAt <= ConfirmWindow)
+            {
+                var plan = _pendingPlan;
+                ClearPending();
+                Organizer.Execute(plan);
+                return;
+            }
+
+            // first press (or stale/other-chest) -> build a fresh plan and preview it
+            var built = Organizer.BuildPlan(_current, Plugin.SorterRadius.Value);
+            if (built.IsEmpty)
+            {
+                ClearPending();
+                Msg("Nothing to organize");
+                return;
+            }
+
+            _pendingPlan = built;
+            _pendingChest = _current;
+            _pendingAt = Time.time;
+            var s = built.Summary;
+            Msg("Organize: move " + s.TotalItems + " item" + (s.TotalItems == 1 ? "" : "s") +
+                " across " + s.TargetChests + " chest" + (s.TargetChests == 1 ? "" : "s") + " - press again to confirm");
+        }
+
+        private static void ClearPending()
+        {
+            _pendingPlan = null;
+            _pendingChest = null;
+            _pendingAt = 0f;
+        }
+
         private static void Refresh()
         {
             if (_bar == null) return;
@@ -190,9 +239,14 @@ namespace ChestButler.Patches
                 showPull = Filters.GetSpec(_current).HasExplicit;
                 if (showPull) _pullLabel.text = "Pull";
             }
+
+            // Organize replaces the pin/clear/pull group on sorter chests
+            if (isSorter) _organizeLabel.text = "Organize";
+
             _pinBtn.gameObject.SetActive(showPin);
             _clearBtn.gameObject.SetActive(showClear);
             _pullBtn.gameObject.SetActive(showPull);
+            _organizeBtn.gameObject.SetActive(isSorter);
         }
 
         private static void Msg(string text)

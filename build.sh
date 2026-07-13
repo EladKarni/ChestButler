@@ -1,29 +1,50 @@
 #!/usr/bin/env bash
 # Build + auto-install into the Thunderstore profile. Output: dist/ChestButler.dll
 set -e
-export DOTNET_ROOT="$HOME/dotnet/usr/lib/dotnet"
 export DOTNET_CLI_TELEMETRY_OPTOUT=1
-export PATH="$DOTNET_ROOT:$PATH"
+export DOTNET_NOLOGO=1
 cd "$(dirname "$0")"
-# fail loudly if the three version declarations ever drift apart
-CSPROJ=$(grep -oPm1 '(?<=<Version>)[^<]+' src/ChestButler/ChestButler.csproj)
-PLUGIN=$(grep -oPm1 '(?<=ModVersion = ")[^"]+' src/ChestButler/Plugin.cs)
-MANIFEST=$(grep -oPm1 '(?<="version_number": ")[^"]+' pkg/manifest.json)
+
+# Locate the .NET SDK. Prefer one already on PATH; otherwise try known install roots
+# (the CI/sandbox layout first for backward compat, then a per-user Windows/host install).
+if ! command -v dotnet >/dev/null 2>&1; then
+  for d in "$DOTNET_ROOT" "$HOME/dotnet/usr/lib/dotnet" "$HOME/.dotnet" "$HOME/dotnet"; do
+    if [ -n "$d" ] && { [ -x "$d/dotnet" ] || [ -x "$d/dotnet.exe" ]; }; then
+      export DOTNET_ROOT="$d"; export PATH="$d:$PATH"; break
+    fi
+  done
+fi
+
+# fail loudly if the three version declarations ever drift apart (sed = locale-independent)
+CSPROJ=$(sed -n 's/.*<Version>\(.*\)<\/Version>.*/\1/p' src/ChestButler/ChestButler.csproj | head -1)
+PLUGIN=$(sed -n 's/.*ModVersion = "\([^"]*\)".*/\1/p' src/ChestButler/Plugin.cs | head -1)
+MANIFEST=$(sed -n 's/.*"version_number": "\([^"]*\)".*/\1/p' pkg/manifest.json | head -1)
 if [ "$CSPROJ" != "$PLUGIN" ] || [ "$CSPROJ" != "$MANIFEST" ]; then
   echo "VERSION MISMATCH: csproj=$CSPROJ plugin=$PLUGIN manifest=$MANIFEST" >&2
   exit 1
 fi
+
 dotnet build src/ChestButler/ChestButler.csproj -c Release --no-incremental "$@"
 # keep only our artifacts in dist (framework refs get copy-localed due to FrameworkPathOverride)
 find dist -type f ! -name "ChestButler.dll" ! -name "ChestButler.pdb" -delete
-# auto-install into the game profile if mounted (and clean up the old mod name)
-PLUGINS="/sessions/trusting-eloquent-euler/mnt/profiles/Default/BepInEx/plugins"
-MGR="$PLUGINS/EK_Solutions-ChestButler"
-if [ -d "$MGR" ]; then
-  # single copy inside the manager's package folder (avoids a duplicate-GUID loose DLL)
-  cp dist/ChestButler.dll "$MGR/" && echo "-> installed into manager folder"
-elif [ -d "$PLUGINS" ]; then
-  rm -f "$PLUGINS/ProjectSorter.dll" "$PLUGINS/ProjectSorter.pdb"
-  cp dist/ChestButler.dll "$PLUGINS/" && echo "-> installed to profile plugins (loose)"
+
+# auto-install into the game profile if one is present. Checks the CI/sandbox mount first, then the
+# Windows Thunderstore Mod Manager / r2modman default-profile locations on the host.
+PLUGINS=""
+for d in \
+  "/sessions/trusting-eloquent-euler/mnt/profiles/Default/BepInEx/plugins" \
+  "$HOME/AppData/Roaming/Thunderstore Mod Manager/DataFolder/Valheim/profiles/Default/BepInEx/plugins" \
+  "$HOME/AppData/Roaming/r2modmanPlus-local/Valheim/profiles/Default/BepInEx/plugins" ; do
+  if [ -d "$d" ]; then PLUGINS="$d"; break; fi
+done
+if [ -n "$PLUGINS" ]; then
+  MGR="$PLUGINS/EK_Solutions-ChestButler"
+  if [ -d "$MGR" ]; then
+    # single copy inside the manager's package folder (avoids a duplicate-GUID loose DLL)
+    cp dist/ChestButler.dll "$MGR/" && echo "-> installed into manager folder ($MGR)"
+  else
+    rm -f "$PLUGINS/ProjectSorter.dll" "$PLUGINS/ProjectSorter.pdb"
+    cp dist/ChestButler.dll "$PLUGINS/" && echo "-> installed to profile plugins (loose)"
+  fi
 fi
 echo "-> dist/ChestButler.dll"
