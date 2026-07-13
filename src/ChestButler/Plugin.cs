@@ -26,6 +26,7 @@ namespace ChestButler
         internal static ConfigEntry<int> StacksPerTick;
         internal static ConfigEntry<bool> ContainsFallback;
         internal static ConfigEntry<int> OrganizeMovesPerTick;
+        internal static ConfigEntry<float> StationRange;
 
         private Harmony _harmony;
 
@@ -56,6 +57,11 @@ namespace ChestButler
             OrganizeMovesPerTick = Config.Bind("Organize", "MovesPerTick", 4,
                 new ConfigDescription("How many item moves the Organize sweep performs per frame (higher = faster, more hitch).",
                     new AcceptableValueRange<int>(1, 16),
+                    new ConfigurationManagerAttributes { IsAdminOnly = true }));
+
+            StationRange = Config.Bind("Organize", "StationRange", 8f,
+                new ConfigDescription("Max distance (m) from a chest to a crafting station for the chest to inherit that station's item groups during Organize. Nearest station wins.",
+                    new AcceptableValueRange<float>(1f, 20f),
                     new ConfigurationManagerAttributes { IsAdminOnly = true }));
 
             Groups.Init(Config);
