@@ -12,7 +12,9 @@ namespace ChestButler.Core
         {
             { "stone",     "stone, flint, obsidian, blackmarble, grausten*" },
             { "wood",      "wood, finewood, roundlog, elderbark, yggdrasilwood, blackwood" },
-            { "ores",      "*ore, *scraps, flametalore*" },
+            // NOTE: metal scrap tokens are singular in-game (ironscrap, bronzescrap, copperscrap) —
+            // a '*scraps' wildcard misses all of them and instead catches leatherscraps (hides).
+            { "ores",      "*ore, ironscrap, bronzescrap, copperscrap, flametalore*" },
             { "metals",    "copper, tin, bronze, iron, silver, blackmetal*, flametal*" },
             { "cooking",   "carrot, turnip, onion, raspberries, blueberries, cloudberries, mushroom*, jotunpuffs, magecap, honey, barley, bread*, sausages" },
             { "meat",      "*meat*, necktail, entrails, bloodbag, fish*" },
@@ -22,6 +24,7 @@ namespace ChestButler.Core
             { "meads",     "mead*, barleywine*" },
             { "ammo",      "arrow*, bolt*, turretbolt*" },
             { "hides",     "*hide*, *pelt*, leatherscraps, chitin" },
+            { "fuel",      "coal" },
         };
 
         private static readonly Dictionary<string, ConfigEntry<string>> Entries =
