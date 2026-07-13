@@ -113,3 +113,27 @@ jobs:
             ChestButler-${{ steps.ver.outputs.version }}.zip
           generate_release_notes: true
           make_latest: true
+
+      - name: Check if this version is already on Thunderstore
+        id: tscheck
+        run: |
+          latest=$(curl -sf "https://thunderstore.io/api/experimental/package/EK_Solutions/ChestButler/" | jq -r '.latest.version_number' 2>/dev/null || echo none)
+          echo "Thunderstore latest=$latest  building=${{ steps.ver.outputs.version }}"
+          if [ "$latest" = "${{ steps.ver.outputs.version }}" ]; then
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::v${{ steps.ver.outputs.version }} already on Thunderstore; skipping publish."
+          else
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Publish to Thunderstore
+        if: (github.ref == 'refs/heads/prod' || startsWith(github.ref, 'refs/tags/v')) && steps.tscheck.outputs.publish == 'true'
+        uses: GreenTF/upload-thunderstore-package@v4.3
+        with:
+          namespace: EK_Solutions
+          name: ChestButler
+          version: ${{ steps.ver.outputs.version }}
+          community: valheim
+          description: "Dump-and-sort chests: flag any chest as a Sorter and your loot flies to the right chests. Pin filters, priorities, and a Pull button to restock. Multiplayer-safe via MultiUserChest."
+          file: ChestButler-${{ steps.ver.outputs.version }}.zip
+          token: ${{ secrets.TCLI_AUTH_TOKEN }}
