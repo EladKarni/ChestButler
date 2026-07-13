@@ -126,7 +126,7 @@ The project builds offline. There is no NuGet restore; every reference is a loca
 | Plugin entry, config | `src/ChestButler/Plugin.cs` |
 | Sorting engine (owner-gated tick) | `Core/SorterBehaviour.cs` |
 | Routing rules | `Core/Router.cs` |
-| Per-chest filters (ZDO pins, sign parsing) | `Core/Filters.cs`, `Core/SorterZdo.cs` |
+| Per-chest filters (ZDO pins) | `Core/Filters.cs`, `Core/SorterZdo.cs` |
 | Pull/restock | `Core/Puller.cs` |
 | Item groups | `Core/Groups.cs`, `Core/Names.cs` |
 | Chest UI toolbar | `Patches/GuiPatch.cs` |
@@ -146,8 +146,6 @@ Buttons show up at the bottom of every chest UI:
 | `Pin`, then `Auto (n)`/`Manual (n)` | normal chests | saves the current contents as filters, then toggles whether the sorter fills it automatically |
 | `Clear` | chests with filters | wipes the saved filters |
 | `Pull` | chests with filters | grabs one stack of each saved item from nearby chests |
-
-You can also label a chest with a sign placed on or next to it. `sort: cooking` makes it the cooking chest. Other examples: `sort: finewood, trophy*, p5` (item names, wildcards and a priority) or `sort: off` to make the sorter ignore a chest entirely.
 
 Routing picks a target in this order: a chest that names the item, then a chest whose group covers it, then any chest that already holds some. Ties go to higher priority, then to whichever chest holds the most of that item, then to the nearest one. If the best chest only has room for part of a stack it gets topped off and the rest re-routes.
 
@@ -223,3 +221,4 @@ Project Link: [https://github.com/EladKarni/ChestButler](https://github.com/Elad
 [issues-url]: https://github.com/EladKarni/ChestButler/issues
 [license-shield]: https://img.shields.io/github/license/EladKarni/ChestButler.svg?style=for-the-badge
 [license-url]: https://github.com/EladKarni/ChestButler/blob/main/LICENSE
+              

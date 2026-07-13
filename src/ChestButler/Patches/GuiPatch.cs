@@ -6,8 +6,8 @@ using UnityEngine.UI;
 
 namespace ChestButler.Patches
 {
-    /// <summary>Chest-UI toolbar: [Sorter][Pin][Pull] in a HorizontalLayoutGroup one row
-    /// below the container panel. Layout group handles sizing/spacing and compacts when buttons hide.</summary>
+    /// <summary>Chest-UI toolbar: [Sorter][Pin][Clear][Pull] in a HorizontalLayoutGroup,
+    /// styled from the vanilla Take All button and anchored to the panel's bottom-left corner.</summary>
     [HarmonyPatch(typeof(InventoryGui))]
     internal static class GuiPatch
     {
@@ -33,21 +33,39 @@ namespace ChestButler.Patches
 
         private static void EnsureBar(InventoryGui gui)
         {
-            if (_bar != null) return;                      // Unity fake-null covers scene reloads
+            if (_bar != null) return;
             var takeAll = gui.m_takeAllButton;
             if (takeAll == null) return;
 
+            var srcRt = takeAll.GetComponent<RectTransform>();
+            var parent = srcRt.parent as RectTransform;
+            if (parent == null) return;
+
             var barGo = new GameObject("psort_bar", typeof(RectTransform));
             _bar = (RectTransform)barGo.transform;
-            _bar.SetParent(gui.m_container, false);        // container panel root
-            _bar.anchorMin = new Vector2(0f, 0f);          // bottom-left of the panel…
+            _bar.SetParent(srcRt.parent, false);
+
+            // Find where Take All sits inside the panel (it uses a centre anchor), then
+            // anchor our bar to the panel's bottom-left CORNER and mirror those margins,
+            // so it snaps to the corner and stays symmetric with the top row on any resize.
+            Rect pr = parent.rect;
+            float taW = srcRt.rect.width, taH = srcRt.rect.height;
+            float refX = pr.x + pr.width * srcRt.anchorMin.x;
+            float refY = pr.y + pr.height * srcRt.anchorMin.y;
+            float centerX = refX + srcRt.anchoredPosition.x + (0.5f - srcRt.pivot.x) * taW;
+            float centerY = refY + srcRt.anchoredPosition.y + (0.5f - srcRt.pivot.y) * taH;
+
+            float leftMargin = (centerX - taW * 0.5f) - pr.xMin;   // Take All's gap from the left edge
+            float topMargin  = pr.yMax - (centerY + taH * 0.5f);   // Take All's gap from the top edge
+
+            _bar.anchorMin = new Vector2(0f, 0f);   // pin to the panel's bottom-left corner
             _bar.anchorMax = new Vector2(0f, 0f);
-            _bar.pivot = new Vector2(0f, 1f);
-            _bar.anchoredPosition = new Vector2(12f, -8f); // …hanging just below it (unused space)
+            _bar.pivot     = new Vector2(0f, 0f);   // bar's own bottom-left grows right + up
+            _bar.anchoredPosition = new Vector2(leftMargin, topMargin);   // mirror the top row's margins
 
             var layout = barGo.AddComponent<HorizontalLayoutGroup>();
-            layout.spacing = 6f;
-            layout.childAlignment = TextAnchor.MiddleLeft;
+            layout.spacing = 8f;
+            layout.childAlignment = TextAnchor.LowerLeft;
             layout.childControlWidth = true;
             layout.childControlHeight = true;
             layout.childForceExpandWidth = false;
@@ -69,7 +87,6 @@ namespace ChestButler.Patches
             var btn = Object.Instantiate(template, _bar);
             btn.name = name;
 
-            // strip cloned baggage: localization overwrites our label, gamepad hints steal input
             var loc = btn.GetComponentInChildren<Localize>(true);
             if (loc != null) Object.DestroyImmediate(loc);
             foreach (var gp in btn.GetComponentsInChildren<UIGamePad>(true))
@@ -78,16 +95,20 @@ namespace ChestButler.Patches
             btn.onClick = new Button.ButtonClickedEvent();
             btn.onClick.AddListener(onClick);
 
+            // keep the vanilla button's exact footprint
             var srcRt = template.GetComponent<RectTransform>();
             var le = btn.gameObject.AddComponent<LayoutElement>();
-            le.preferredWidth = srcRt.rect.width * 0.8f;
+            le.preferredWidth = srcRt.rect.width;
             le.preferredHeight = srcRt.rect.height;
 
+            // keep the vanilla font; shrink only if a label runs long
             label = btn.GetComponentInChildren<TMP_Text>();
             if (label != null)
             {
+                float vanilla = label.fontSize;
                 label.enableAutoSizing = true;
-                label.fontSizeMin = 9f;
+                label.fontSizeMax = vanilla;
+                label.fontSizeMin = vanilla - 4f;
             }
             return btn;
         }
@@ -113,14 +134,14 @@ namespace ChestButler.Patches
                 {
                     Filters.SetManual(_current, false);
                     var names = Filters.GetPinned(_current);
-                    Msg($"Pinned: {string.Join(", ", names)} (auto-fill on)");
-                    Plugin.Log.LogInfo($"[pin] {string.Join(", ", names)}");
+                    Msg("Pinned: " + string.Join(", ", names) + " (auto-fill on)");
+                    Plugin.Log.LogInfo("[pin] " + string.Join(", ", names));
                 }
                 else Msg("Chest is empty. Add sample items first");
             }
             else
             {
-                bool manual = !Filters.GetManual(_current);   // pure toggle, pins untouched
+                bool manual = !Filters.GetManual(_current);
                 Filters.SetManual(_current, manual);
                 Msg(manual ? "Auto-fill off. This chest only fills when you click Pull"
                            : "Auto-fill on. The sorter routes matching items here");
@@ -142,7 +163,7 @@ namespace ChestButler.Patches
             if (_current == null) return;
             Puller.PullInto(_current, out int total, out int types);
             Msg(total > 0
-                ? $"Pulled {total} item{(total == 1 ? "" : "s")} ({types} type{(types == 1 ? "" : "s")})"
+                ? "Pulled " + total + " item" + (total == 1 ? "" : "s") + " (" + types + " type" + (types == 1 ? "" : "s") + ")"
                 : "Nothing to pull from nearby chests");
         }
 
@@ -156,14 +177,14 @@ namespace ChestButler.Patches
             bool isSorter = SorterZdo.IsSorter(_current);
             _sorterLabel.text = isSorter ? "Sorter: ON" : "Sorter: OFF";
 
-            bool showPin = !isSorter;                      // sorters are sources, not targets
+            bool showPin = !isSorter;
             bool showClear = false;
             bool showPull = false;
             if (showPin)
             {
                 int n = Filters.GetPinned(_current).Count;
                 _pinLabel.text = n == 0 ? "Pin"
-                    : Filters.GetManual(_current) ? $"Manual ({n})" : $"Auto ({n})";
+                    : Filters.GetManual(_current) ? "Manual (" + n + ")" : "Auto (" + n + ")";
                 showClear = n > 0;
                 if (showClear) _clearLabel.text = "Clear";
                 showPull = Filters.GetSpec(_current).HasExplicit;
@@ -171,7 +192,7 @@ namespace ChestButler.Patches
             }
             _pinBtn.gameObject.SetActive(showPin);
             _clearBtn.gameObject.SetActive(showClear);
-            _pullBtn.gameObject.SetActive(showPull);       // layout group closes the gaps
+            _pullBtn.gameObject.SetActive(showPull);
         }
 
         private static void Msg(string text)

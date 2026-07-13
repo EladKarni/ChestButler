@@ -13,13 +13,17 @@ if [ "$CSPROJ" != "$PLUGIN" ] || [ "$CSPROJ" != "$MANIFEST" ]; then
   echo "VERSION MISMATCH: csproj=$CSPROJ plugin=$PLUGIN manifest=$MANIFEST" >&2
   exit 1
 fi
-dotnet build src/ChestButler/ChestButler.csproj -c Release "$@"
+dotnet build src/ChestButler/ChestButler.csproj -c Release --no-incremental "$@"
 # keep only our artifacts in dist (framework refs get copy-localed due to FrameworkPathOverride)
 find dist -type f ! -name "ChestButler.dll" ! -name "ChestButler.pdb" -delete
 # auto-install into the game profile if mounted (and clean up the old mod name)
 PLUGINS="/sessions/trusting-eloquent-euler/mnt/profiles/Default/BepInEx/plugins"
-if [ -d "$PLUGINS" ]; then
+MGR="$PLUGINS/EK_Solutions-ChestButler"
+if [ -d "$MGR" ]; then
+  # single copy inside the manager's package folder (avoids a duplicate-GUID loose DLL)
+  cp dist/ChestButler.dll "$MGR/" && echo "-> installed into manager folder"
+elif [ -d "$PLUGINS" ]; then
   rm -f "$PLUGINS/ProjectSorter.dll" "$PLUGINS/ProjectSorter.pdb"
-  cp dist/ChestButler.dll dist/ChestButler.pdb "$PLUGINS/" && echo "→ installed to profile plugins"
+  cp dist/ChestButler.dll "$PLUGINS/" && echo "-> installed to profile plugins (loose)"
 fi
-echo "→ dist/ChestButler.dll"
+echo "-> dist/ChestButler.dll"

@@ -17,7 +17,7 @@ namespace ChestButler
     {
         public const string ModGuid = "eksolutions.chestbutler";
         public const string ModName = "ChestButler";
-        public const string ModVersion = "1.0.1";
+        public const string ModVersion = "1.0.2";
 
         internal static ManualLogSource Log;
         internal static ConfigEntry<float> SorterRadius;
