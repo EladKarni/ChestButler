@@ -134,6 +134,7 @@ jobs:
           name: ChestButler
           version: ${{ steps.ver.outputs.version }}
           community: valheim
+          repo: https://thunderstore.io
           description: "Dump-and-sort chests: flag any chest as a Sorter and your loot flies to the right chests. Pin filters, priorities, and a Pull button to restock. Multiplayer-safe via MultiUserChest."
           file: ChestButler-${{ steps.ver.outputs.version }}.zip
           token: ${{ secrets.TCLI_AUTH_TOKEN }}
