@@ -54,7 +54,7 @@ namespace ChestButler.Core
                 var c = containers[i];
                 var inv = c.GetInventory();
                 var spec = Filters.GetSpec(c);
-                var stationGroups = Stations.GroupsForChest(c);   // also logs the detected station m_name
+                var stationGroups = Stations.GroupsForChest(c, Plugin.StationRange.Value);   // logs the detected station m_name at Info
 
                 var items = new List<ItemDrop.ItemData>();
                 var stacks = new List<StackView>();
