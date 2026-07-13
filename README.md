@@ -221,4 +221,3 @@ Project Link: [https://github.com/EladKarni/ChestButler](https://github.com/Elad
 [issues-url]: https://github.com/EladKarni/ChestButler/issues
 [license-shield]: https://img.shields.io/github/license/EladKarni/ChestButler.svg?style=for-the-badge
 [license-url]: https://github.com/EladKarni/ChestButler/blob/main/LICENSE
-              
