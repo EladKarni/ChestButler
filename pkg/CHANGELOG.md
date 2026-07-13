@@ -5,8 +5,9 @@
 - Previews first ("Organize: move N items across M chests — press again to confirm") and only runs on a second press within 5 seconds; closing the chest, opening another, or the timeout cancels it
 - Routing priority per item type: a chest that pins/filters it, then a chest whose adjacent crafting station attracts its group (forge → metals/ores, workbench → wood/hides, stonecutter → stone, cauldron → cooking/meat/seeds, black forge → metals/valuables, galdr table → valuables/meads), then the chest already holding the most of it; otherwise it stays put
 - Tools and armor (non-stackables) stay where they are unless a chest explicitly pins them
-- New server-synced `[Stations]` config section maps crafting-station names to item groups (editable, add modded stations here); new `[Organize] MovesPerTick` throttles the per-frame move budget
-- CAVEAT: smelters, kilns, blast furnaces, windmills and fermenters are not crafting stations, so station adjacency does not detect them — only true crafting stations attract materials
+- Station adjacency also covers processing pieces: smelters and blast furnaces attract ores + fuel (new `fuel` item group with coal), fermenters attract meads; kilns, eitr refineries and cooking stations are detected too (add mappings in config if wanted)
+- New server-synced `[Stations]` config section maps station names to item groups (editable; add modded stations via the `CustomStations` entry — the log prints every detected station token); new `[Organize] MovesPerTick` and `StationRange` settings
+- CAVEAT: windmills are not detectable (no station identity in game code) — pin a chest for barley/flour instead
 - This is a minor release: server and all clients must update together (a 1.1.0 client is refused by a 1.0.x server, and vice-versa)
 
 

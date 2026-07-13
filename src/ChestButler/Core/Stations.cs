@@ -6,33 +6,34 @@ using UnityEngine;
 
 namespace ChestButler.Core
 {
-    /// <summary>Curated crafting-station → item-group map (server-synced config, section [Stations]),
-    /// mirroring <see cref="Groups"/>. Keys are the station's <c>CraftingStation.m_name</c> token;
-    /// values are comma-separated group names that must exist in [ItemGroups]. During Organize, a
-    /// chest sitting next to a station inherits that station's groups.
+    /// <summary>Curated station → item-group map (server-synced config, section [Stations]),
+    /// mirroring <see cref="Groups"/>. Keys are the piece's <c>m_name</c> token; values are
+    /// comma-separated group names that must exist in [ItemGroups]. During Organize, a chest
+    /// sitting next to a station inherits that station's groups.
     ///
-    /// Detection: we scan <c>CraftingStation.m_allStations</c> for the NEAREST station within
-    /// <see cref="Plugin.StationRange"/> metres of the chest. (We deliberately do NOT use
-    /// <c>CraftingStation.GetCraftingStation</c> — that only matches a ~0.1 m "StationUseArea"
-    /// trigger, i.e. the exact tile you stand on to craft, so an adjacent chest is never detected.)
+    /// Two kinds of "station" are detected, nearest one wins within Plugin.StationRange:
+    ///  - True crafting stations, scanned from <c>CraftingStation.m_allStations</c>. (We do NOT use
+    ///    <c>GetCraftingStation</c> — it only matches a ~0.1 m use-trigger, never an adjacent chest.)
+    ///  - Processing pieces — smelters, kilns, blast furnaces, eitr refineries, fermenters, cooking
+    ///    stations — which are NOT CraftingStations. They register here from Awake/OnDestroyed
+    ///    patches (Patches/ProcessorPatches.cs), same lifecycle pattern as ContainerTracker.
     ///
-    /// MODDED stations (e.g. a "blacksmith workshop") have their own m_name and are NOT in the
-    /// defaults — the Info-level log below prints the detected token so you can add it to the config.
-    ///
-    /// CAVEAT: smelters, kilns, blast furnaces, windmills and fermenters are Smelter/Fermenter/
-    /// Windmill components, NOT CraftingStations, so they are never detected. Route their materials
-    /// with a chest pin (or a `sort: group` sign) instead.</summary>
+    /// Windmills are neither (no m_name) and stay undetected — use a pin instead.
+    /// MODDED stations: the Info-level log prints every detected token so unmapped ones can be
+    /// added via the CustomStations entry without a rebuild.</summary>
     internal static class Stations
     {
         private static readonly Dictionary<string, string> Defaults = new Dictionary<string, string>
         {
-            { "$piece_forge",       "metals, ores" },
-            { "$piece_workbench",   "wood, hides" },
-            { "$piece_stonecutter", "stone" },
-            { "$piece_cauldron",    "cooking, meat, seeds" },
-            { "$piece_fermenter",   "meads" },              // inert: fermenter is not a CraftingStation
-            { "$piece_blackforge",  "metals, valuables" },
-            { "$piece_magetable",   "valuables, meads" },
+            { "$piece_forge",         "metals, ores" },
+            { "$piece_workbench",     "wood, hides" },
+            { "$piece_stonecutter",   "stone" },
+            { "$piece_cauldron",      "cooking, meat, seeds" },
+            { "$piece_fermenter",     "meads" },
+            { "$piece_blackforge",    "metals, valuables" },
+            { "$piece_magetable",     "valuables, meads" },
+            { "$piece_smelter",       "ores, fuel" },
+            { "$piece_blastfurnace",  "ores, fuel" },
         };
 
         private static readonly Dictionary<string, ConfigEntry<string>> Entries =
@@ -42,9 +43,45 @@ namespace ChestButler.Core
         private static readonly List<string> Empty = new List<string>();
         private static ConfigEntry<string> Extra;   // free-form mappings for modded stations
 
+        // Live processing pieces (Smelter/Fermenter/CookingStation) → their m_name token.
+        // Pruned on scan because OnDestroyed only fires on damage-destruction, not area unload.
+        private static readonly Dictionary<Component, string> Processors =
+            new Dictionary<Component, string>();
+        private static readonly List<Component> Dead = new List<Component>();
+
         // private static List<CraftingStation> m_allStations
         private static readonly FieldInfo AllStationsField =
             AccessTools.Field(typeof(CraftingStation), "m_allStations");
+
+        /// <summary>A hammer placement GHOST instantiates the real piece prefab — its component
+        /// Awake (and our patch) fires, but its ZNetView is force-disabled and never gets a ZDO.
+        /// Only pieces with a live ZDO are real, placed stations.</summary>
+        private static bool IsReal(Component c)
+        {
+            var nv = c != null ? c.GetComponentInParent<ZNetView>() : null;
+            return nv != null && nv.IsValid();
+        }
+
+        internal static void RegisterProcessor(Component c, string mName)
+        {
+            if (c == null || string.IsNullOrEmpty(mName) || !IsReal(c)) return;   // skip placement ghosts
+            // Opportunistic prune: zone unload destroys pieces WITHOUT firing OnDestroyed, and a
+            // dedicated server (or a client that never presses Organize) would otherwise accumulate
+            // dead keys forever. Registration happens exactly when zones load, so this stays amortized.
+            foreach (var kv in Processors)
+                if (kv.Key == null) Dead.Add(kv.Key);
+            if (Dead.Count > 0)
+            {
+                foreach (var d in Dead) Processors.Remove(d);
+                Dead.Clear();
+            }
+            Processors[c] = mName;
+        }
+
+        internal static void UnregisterProcessor(Component c)
+        {
+            if (c != null) Processors.Remove(c);
+        }
 
         internal static void Init(ConfigFile config)
         {
@@ -105,34 +142,63 @@ namespace ChestButler.Core
             return Empty;
         }
 
-        /// <summary>Groups attracted by the nearest crafting station within <paramref name="range"/>
-        /// metres of a chest, or empty. Logs the detected station m_name at Info so tokens (including
-        /// modded ones) can be verified and added to the config.</summary>
+        /// <summary>Groups attracted by the nearest station-like piece (crafting station OR
+        /// smelter/fermenter/cooking station) within <paramref name="range"/> metres of a chest,
+        /// or empty. Logs the detected m_name at Info so tokens (including modded ones) can be
+        /// verified and added to the config.</summary>
         internal static List<string> GroupsForChest(Container c, float range)
         {
-            if (c == null || AllStationsField == null) return Empty;
-            var all = AllStationsField.GetValue(null) as List<CraftingStation>;
-            if (all == null || all.Count == 0) return Empty;
-
+            if (c == null) return Empty;
             var pos = c.transform.position;
-            CraftingStation best = null;
-            float bestD = range;
-            foreach (var st in all)
-            {
-                if (st == null) continue;
-                float d = Vector3.Distance(st.transform.position, pos);
-                if (d < bestD) { bestD = d; best = st; }
-            }
-            if (best == null) return Empty;
+            // Nearest MAPPED station wins; unmapped pieces never shadow a mapped one (a campfire's
+            // unmapped cooking station must not blank out the cauldron 2 m further away). The
+            // nearest unmapped token is still logged as a CustomStations hint when nothing matches.
+            string bestMapped = null, bestUnmapped = null;
+            float bestMappedD = range, bestUnmappedD = range;
 
-            var key = best.m_name;
-            var groups = GroupsForStationName(key);
-            if (groups.Count > 0)
-                Plugin.Log.LogInfo("[organize] chest near '" + key + "' (" + bestD.ToString("0.0") + "m) -> " + string.Join(",", groups));
-            else if (!string.IsNullOrEmpty(key))
-                Plugin.Log.LogInfo("[organize] chest near station '" + key + "' (" + bestD.ToString("0.0") +
-                    "m) has NO [Stations] mapping - add '" + key + " = <groups>' to the config to route its materials");
-            return groups;
+            var all = AllStationsField != null ? AllStationsField.GetValue(null) as List<CraftingStation> : null;
+            if (all != null)
+            {
+                foreach (var st in all)
+                {
+                    if (st == null || !IsReal(st)) continue;   // vanilla adds placement ghosts to m_allStations too
+                    Consider(st.m_name, Vector3.Distance(st.transform.position, pos),
+                        ref bestMapped, ref bestMappedD, ref bestUnmapped, ref bestUnmappedD);
+                }
+            }
+
+            foreach (var kv in Processors)
+            {
+                if (kv.Key == null) { Dead.Add(kv.Key); continue; }   // unloaded piece
+                if (!IsReal(kv.Key)) continue;                        // ZDO died since registration
+                Consider(kv.Value, Vector3.Distance(kv.Key.transform.position, pos),
+                    ref bestMapped, ref bestMappedD, ref bestUnmapped, ref bestUnmappedD);
+            }
+            if (Dead.Count > 0)
+            {
+                foreach (var dead in Dead) Processors.Remove(dead);
+                Dead.Clear();
+            }
+
+            if (bestMapped != null)
+            {
+                var groups = GroupsForStationName(bestMapped);
+                Plugin.Log.LogInfo("[organize] chest near '" + bestMapped + "' (" + bestMappedD.ToString("0.0") + "m) -> " + string.Join(",", groups));
+                return groups;
+            }
+            if (bestUnmapped != null)
+                Plugin.Log.LogInfo("[organize] chest near station '" + bestUnmapped + "' (" + bestUnmappedD.ToString("0.0") +
+                    "m) has NO [Stations] mapping - add '" + bestUnmapped + " = <groups>' to the config to route its materials");
+            return Empty;
+        }
+
+        private static void Consider(string mName, float d,
+            ref string bestMapped, ref float bestMappedD, ref string bestUnmapped, ref float bestUnmappedD)
+        {
+            if (string.IsNullOrEmpty(mName)) return;
+            bool mapped = Parsed.TryGetValue(mName, out var groups) && groups.Count > 0;
+            if (mapped) { if (d < bestMappedD) { bestMappedD = d; bestMapped = mName; } }
+            else        { if (d < bestUnmappedD) { bestUnmappedD = d; bestUnmapped = mName; } }
         }
     }
 }
