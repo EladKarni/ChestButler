@@ -91,13 +91,22 @@ namespace ChestButler.Core
                     Id = i,
                     ExcludedAsTarget = excluded,
                     Stacks = stacks,
-                    Pins = norm => specLocal.MatchesItem(norm) || specLocal.MatchesGroup(norm),
+                    PinsItem = norm => specLocal.MatchesItem(norm),
+                    PinsGroup = norm => specLocal.MatchesGroup(norm),
                     StationAttracts = norm => StationAttracts(groupsLocal, norm),
-                    RoomFor = norm =>
+                    Priority = spec.Priority,
+                    EmptySlots = inv != null ? inv.GetEmptySlots() : 0,
+                    PartialSpaceFor = norm =>
                     {
                         if (invLocal == null) return 0;
-                        return sampleByNorm.TryGetValue(norm, out var sample) ? Router.Room(invLocal, sample) : 0;
-                    }
+                        // NG+ caveat: one sample per norm, so mixed-worldLevel stacks of the same item
+                        // make this an estimate; the per-move Room re-check clamps at execute time.
+                        return sampleByNorm.TryGetValue(norm, out var sample)
+                            ? invLocal.FindFreeStackSpace(sample.m_shared.m_name, sample.m_worldLevel)
+                            : 0;
+                    },
+                    MaxStackOf = norm =>
+                        sampleByNorm.TryGetValue(norm, out var sample) ? sample.m_shared.m_maxStackSize : 1
                 });
             }
 
@@ -126,8 +135,10 @@ namespace ChestButler.Core
         }
 
         /// <summary>Kick off execution as a coroutine on the plugin so it can spread across frames.
-        /// Organize is a client-triggered action (like Pull), NOT owner-gated like the sorter tick —
-        /// MultiUserChest routes each move to the owning peer.</summary>
+        /// Organize is a client-triggered action (like Pull), NOT owner-gated like the sorter tick.
+        /// MultiUserChest routes each REMOVE to the source chest's owner; the destination add is
+        /// applied to our local inventory copy, so we claim destination ownership per move (below)
+        /// to make the vanilla owner-gated Container.Save persist it.</summary>
         internal static void Execute(OrganizePlan plan)
         {
             if (plan == null || plan.IsEmpty) return;
@@ -136,6 +147,7 @@ namespace ChestButler.Core
                 Plugin.Log.LogWarning("[organize] no Plugin.Instance; cannot start execution");
                 return;
             }
+            Plugin.Log.LogInfo("[organize] executing " + plan.Moves.Count + " move(s)");
             Plugin.Instance.StartCoroutine(Run(plan));
         }
 
@@ -168,8 +180,16 @@ namespace ChestButler.Core
 
                 var tgtNv = SorterZdo.NView(tgt);
                 if (tgtNv == null || !tgtNv.IsValid()) continue;
+                if (tgt.IsInUse()) continue;               // another player is browsing it; don't yank ownership
 
-                // exactly Puller's primitive - the ONLY sanctioned write path (routes to the owner)
+                // MUC routes the REMOVE to the source owner, but applies the destination add to OUR
+                // local inventory (InventoryHandler.RPC_RequestItemRemoveResponse → MoveItemToThis).
+                // Vanilla Container.Save() is owner-gated, so without owning the destination ZDO the
+                // added items would never persist (silent loss in multiplayer). Same defensive claim
+                // as Filters.SetPinned / SorterZdo.SetSorter.
+                if (!tgtNv.IsOwner()) tgtNv.ClaimOwnership();
+
+                // exactly Puller's transfer primitive - the ONLY sanctioned write path
                 ContainerHandler.RemoveItemFromChest(
                     src, item, tInv, new Vector2i(-1, -1),
                     tgtNv.GetZDO().m_uid, amount, null);

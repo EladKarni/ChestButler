@@ -19,9 +19,13 @@ namespace ChestButler.Core
         public int Id;
         public bool ExcludedAsTarget;              // Sorter, FilterSpec.Ignore or ManualOnly → never a destination
         public List<StackView> Stacks;             // current contents (movable stacks only)
-        public Func<string, bool> Pins;            // filter (pin/sign) matches this norm
+        public Func<string, bool> PinsItem;        // explicit item pin/sign token matches (Router tier 3)
+        public Func<string, bool> PinsGroup;       // sign group matches (Router tier 2)
         public Func<string, bool> StationAttracts; // adjacent crafting station attracts this norm
-        public Func<string, int> RoomFor;          // capacity, in item units, this chest has for this norm (>= 0)
+        public int Priority;                       // sign priority (pN); ranks within a tier like Router
+        public int EmptySlots;                     // free slots — a SHARED resource across item types
+        public Func<string, int> PartialSpaceFor;  // free space in existing partial stacks of this norm
+        public Func<string, int> MaxStackOf;       // max stack size of this norm (1 = non-stackable)
 
         public int HeldOf(string norm)
         {
@@ -51,16 +55,17 @@ namespace ChestButler.Core
         public int SourceChests;  // distinct sources
     }
 
-    /// <summary>PURE, deterministic planner (plan §3). For each item type it chooses ONE winning
-    /// destination — pin (tier 4) &gt; station adjacency (tier 3) &gt; most-held consolidation
-    /// (tier 2); within a tier the most-held chest wins, ties broken by nearest (input order) — then
-    /// moves every other instance into it, capped by the target's room. No self-moves, no ping-pong:
-    /// each type is decided once. Non-stackables (tools/armor) are skipped unless some target pins
-    /// them. No Unity, no config, no randomness.</summary>
+    /// <summary>PURE, deterministic planner. For each item type it chooses ONE winning destination,
+    /// mirroring Router's ranking exactly so Organize and the live sorter never disagree (no
+    /// ping-pong): explicit item pin &gt; group/sign match &gt; station adjacency &gt; most-held;
+    /// within a tier, sign priority (pN) &gt; most-held &gt; nearest (input order). Capacity is
+    /// slot-accurate: empty slots are a shared resource across all item types routed to the same
+    /// chest, so the preview never promises more than actually fits. Non-stackables (tools/armor)
+    /// are skipped unless some target pins them. No Unity, no config, no randomness.</summary>
     internal static class OrganizePlanner
     {
         private struct Holder { public int ChestId; public int StackIndex; public int Count; }
-        private enum Tier { Pin, Station, Holds }
+        private enum Tier { PinItem, PinGroup, Station, Holds }
 
         internal static List<OrganizeMove> Plan(IReadOnlyList<ChestView> chests, out OrganizeSummary summary)
         {
@@ -91,6 +96,8 @@ namespace ChestButler.Core
                 }
             }
 
+            // Empty slots remaining per target — shared across every item type routed there.
+            var emptyLeft = new Dictionary<int, int>();
             var srcSet = new HashSet<int>();
             var tgtSet = new HashSet<int>();
 
@@ -99,14 +106,34 @@ namespace ChestButler.Core
                 int targetId = ChooseTarget(chests, norm);
                 if (targetId < 0) continue;                       // nothing wants it → leave in place
 
-                int room = chests[targetId].RoomFor != null ? chests[targetId].RoomFor(norm) : 0;
-                if (room <= 0) continue;                          // home is full → overflow stays in source
+                var target = chests[targetId];
+                if (!emptyLeft.ContainsKey(targetId)) emptyLeft[targetId] = Math.Max(0, target.EmptySlots);
+
+                int maxStack = Math.Max(1, target.MaxStackOf != null ? target.MaxStackOf(norm) : 1);
+                int partialLeft = Math.Max(0, target.PartialSpaceFor != null ? target.PartialSpaceFor(norm) : 0);
+                int slotFill = 0;   // space left in the newly opened slot of THIS norm
 
                 foreach (var h in byType[norm])
                 {
                     if (h.ChestId == targetId) continue;          // never move a chest into itself
-                    int amount = Math.Min(h.Count, room);
-                    if (amount <= 0) break;                       // target full
+                    int avail = partialLeft + slotFill + emptyLeft[targetId] * maxStack;
+                    int amount = Math.Min(h.Count, avail);
+                    if (amount <= 0) break;                       // target full → overflow stays in source
+
+                    // consume capacity: partial stacks first, then the open slot, then fresh slots
+                    int rest = amount;
+                    int fromPartial = Math.Min(rest, partialLeft);
+                    partialLeft -= fromPartial; rest -= fromPartial;
+                    int fromOpen = Math.Min(rest, slotFill);
+                    slotFill -= fromOpen; rest -= fromOpen;
+                    while (rest > 0)
+                    {
+                        emptyLeft[targetId]--;                    // open a fresh slot (shared resource)
+                        slotFill = maxStack;
+                        int take = Math.Min(rest, slotFill);
+                        slotFill -= take; rest -= take;
+                    }
+
                     moves.Add(new OrganizeMove
                     {
                         SrcId = h.ChestId,
@@ -115,7 +142,6 @@ namespace ChestButler.Core
                         Norm = norm,
                         Amount = amount
                     });
-                    room -= amount;
                     summary.TotalItems += amount;
                     srcSet.Add(h.ChestId);
                     tgtSet.Add(targetId);
@@ -133,25 +159,28 @@ namespace ChestButler.Core
             {
                 var c = chests[i];
                 if (c == null || c.ExcludedAsTarget) continue;
-                if (c.Pins != null && c.Pins(norm)) return true;
+                if (c.PinsItem != null && c.PinsItem(norm)) return true;
+                if (c.PinsGroup != null && c.PinsGroup(norm)) return true;
             }
             return false;
         }
 
         private static int ChooseTarget(IReadOnlyList<ChestView> chests, string norm)
         {
-            int pick = PickMostHeld(chests, norm, Tier.Pin);
+            int pick = PickBest(chests, norm, Tier.PinItem);
             if (pick >= 0) return pick;
-            pick = PickMostHeld(chests, norm, Tier.Station);
+            pick = PickBest(chests, norm, Tier.PinGroup);
             if (pick >= 0) return pick;
-            return PickMostHeld(chests, norm, Tier.Holds);
+            pick = PickBest(chests, norm, Tier.Station);
+            if (pick >= 0) return pick;
+            return PickBest(chests, norm, Tier.Holds);
         }
 
-        /// <summary>Within the chests qualifying for <paramref name="tier"/>, return the one holding
-        /// the most of <paramref name="norm"/>; ties go to the earliest (nearest) chest. -1 if none.</summary>
-        private static int PickMostHeld(IReadOnlyList<ChestView> chests, string norm, Tier tier)
+        /// <summary>Within the chests qualifying for <paramref name="tier"/>, rank like Router:
+        /// sign priority, then most-held, then earliest (nearest). -1 if none qualify.</summary>
+        private static int PickBest(IReadOnlyList<ChestView> chests, string norm, Tier tier)
         {
-            int bestId = -1, bestHeld = -1;
+            int bestId = -1, bestPrio = int.MinValue, bestHeld = -1;
             for (int i = 0; i < chests.Count; i++)     // input order == nearest-first
             {
                 var c = chests[i];
@@ -160,14 +189,21 @@ namespace ChestButler.Core
                 bool qualifies;
                 switch (tier)
                 {
-                    case Tier.Pin:     qualifies = c.Pins != null && c.Pins(norm); break;
-                    case Tier.Station: qualifies = c.StationAttracts != null && c.StationAttracts(norm); break;
-                    default:           qualifies = c.HeldOf(norm) > 0; break;
+                    case Tier.PinItem:  qualifies = c.PinsItem != null && c.PinsItem(norm); break;
+                    case Tier.PinGroup: qualifies = c.PinsGroup != null && c.PinsGroup(norm); break;
+                    case Tier.Station:  qualifies = c.StationAttracts != null && c.StationAttracts(norm); break;
+                    default:            qualifies = c.HeldOf(norm) > 0; break;
                 }
                 if (!qualifies) continue;
 
                 int held = c.HeldOf(norm);
-                if (held > bestHeld) { bestHeld = held; bestId = i; }   // strictly greater → nearest wins ties
+                if (c.Priority > bestPrio ||
+                    (c.Priority == bestPrio && held > bestHeld))  // strictly greater → nearest wins ties
+                {
+                    bestPrio = c.Priority;
+                    bestHeld = held;
+                    bestId = i;
+                }
             }
             return bestId;
         }

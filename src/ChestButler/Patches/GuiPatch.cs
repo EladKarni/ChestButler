@@ -20,6 +20,7 @@ namespace ChestButler.Patches
         // Organize preview-then-confirm: first press builds+previews a plan, a second press on the
         // same chest within the window executes it. Any close / different chest / timeout cancels.
         private const float ConfirmWindow = 5f;
+        private const float MinConfirmDelay = 0.3f;   // swallow double-click bounce on the arming press
         private static OrganizePlan _pendingPlan;
         private static Container _pendingChest;
         private static float _pendingAt;
@@ -39,6 +40,14 @@ namespace ChestButler.Patches
             _current = null;
             ClearPending();
             if (_bar != null) _bar.gameObject.SetActive(false);
+        }
+
+        // Revert the Confirm? label the moment a pending plan expires (cheap: no-op unless pending).
+        [HarmonyPostfix, HarmonyPatch("Update")]
+        private static void UpdatePostfix()
+        {
+            if (_pendingPlan != null && Time.time - _pendingAt > ConfirmWindow)
+                ClearPending();
         }
 
         private static void EnsureBar(InventoryGui gui)
@@ -186,6 +195,7 @@ namespace ChestButler.Patches
             // second press on the same chest within the window -> execute the previewed plan
             if (_pendingPlan != null && _pendingChest == _current && Time.time - _pendingAt <= ConfirmWindow)
             {
+                if (Time.time - _pendingAt < MinConfirmDelay) return;   // accidental double-click: keep the preview
                 var plan = _pendingPlan;
                 ClearPending();
                 Organizer.Execute(plan);
@@ -205,6 +215,9 @@ namespace ChestButler.Patches
             _pendingChest = _current;
             _pendingAt = Time.time;
             var s = built.Summary;
+            if (_organizeLabel != null) _organizeLabel.text = "Confirm?";   // unmissable, unlike the fading Msg
+            Plugin.Log.LogInfo("[organize] plan ready: " + s.TotalItems + " items -> " + s.TargetChests +
+                " chest(s) from " + s.SourceChests + " source(s); awaiting confirm");
             Msg("Organize: move " + s.TotalItems + " item" + (s.TotalItems == 1 ? "" : "s") +
                 " across " + s.TargetChests + " chest" + (s.TargetChests == 1 ? "" : "s") + " - press again to confirm");
         }
@@ -214,6 +227,7 @@ namespace ChestButler.Patches
             _pendingPlan = null;
             _pendingChest = null;
             _pendingAt = 0f;
+            if (_organizeLabel != null) _organizeLabel.text = "Organize";
         }
 
         private static void Refresh()
@@ -241,7 +255,8 @@ namespace ChestButler.Patches
             }
 
             // Organize replaces the pin/clear/pull group on sorter chests
-            if (isSorter) _organizeLabel.text = "Organize";
+            if (isSorter)
+                _organizeLabel.text = (_pendingPlan != null && _pendingChest == _current) ? "Confirm?" : "Organize";
 
             _pinBtn.gameObject.SetActive(showPin);
             _clearBtn.gameObject.SetActive(showClear);
