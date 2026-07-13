@@ -2,7 +2,7 @@ using System;
 using System.Collections.Generic;
 using ChestButler.Core;
 
-// Hand-rolled, dependency-free test runner for the pure OrganizePlanner (plan §8).
+// Hand-rolled, dependency-free test runner for the pure OrganizePlanner.
 // Chests are addressed by their position in the input list (index == chest id in the plan output),
 // which the planner also treats as nearest-first ordering.
 internal static class Program
@@ -18,7 +18,9 @@ internal static class Program
 
     // Build a ChestView. Affinity/capacity are delegates (that is what keeps the planner Unity-free).
     private static ChestView Chest(int id, (string norm, int count, bool stackable)[] stacks = null,
-        string[] pins = null, string[] station = null, int room = 1000, bool excluded = false)
+        string[] pins = null, string[] groupPins = null, string[] station = null,
+        int priority = 0, int emptySlots = 100, int maxStack = 50,
+        Dictionary<string, int> partial = null, bool excluded = false)
     {
         var sv = new List<StackView>();
         if (stacks != null)
@@ -26,6 +28,7 @@ internal static class Program
                 sv.Add(new StackView { Norm = s.norm, Count = s.count, Stackable = s.stackable });
 
         var pinSet = new HashSet<string>(pins ?? new string[0]);
+        var grpSet = new HashSet<string>(groupPins ?? new string[0]);
         var stSet = new HashSet<string>(station ?? new string[0]);
 
         return new ChestView
@@ -33,9 +36,13 @@ internal static class Program
             Id = id,
             ExcludedAsTarget = excluded,
             Stacks = sv,
-            Pins = n => pinSet.Contains(n),
+            PinsItem = n => pinSet.Contains(n),
+            PinsGroup = n => grpSet.Contains(n),
             StationAttracts = n => stSet.Contains(n),
-            RoomFor = n => room
+            Priority = priority,
+            EmptySlots = emptySlots,
+            PartialSpaceFor = n => partial != null && partial.TryGetValue(n, out var v) ? v : 0,
+            MaxStackOf = n => maxStack
         };
     }
 
@@ -49,10 +56,10 @@ internal static class Program
         return n;
     }
 
-    private static int TotalTo(List<OrganizeMove> moves, int tgt)
+    private static int TotalTo(List<OrganizeMove> moves, int tgt, string norm = null)
     {
         int n = 0;
-        foreach (var m in moves) if (m.TgtId == tgt) n += m.Amount;
+        foreach (var m in moves) if (m.TgtId == tgt && (norm == null || m.Norm == norm)) n += m.Amount;
         return n;
     }
 
@@ -102,10 +109,9 @@ internal static class Program
             Check(moves.Count == 1 && moves[0].TgtId == 0 && moves[0].SrcId == 1, "tie routes 1->0 (nearest)");
         }
 
-        // 4) Priority: pin beats station beats most-held.
+        // 4) Tier order: item pin > station > most-held.
         Console.WriteLine("[4] pin > station > most-held");
         {
-            // pin present -> pin wins over station (chest0) and most-held (chest2)
             var pinCase = new List<ChestView>
             {
                 Chest(0, new[] { S("iron", 1) }, station: new[] { "iron" }),
@@ -117,7 +123,6 @@ internal static class Program
             Check(MovesTo(m1, 1) == m1.Count && m1.Count > 0, "all iron routes to the pinning chest (1)");
             Check(TotalTo(m1, 1) == 54, "54 iron consolidated into pin (1+50+3)");
 
-            // no pin -> station beats most-held
             var stationCase = new List<ChestView>
             {
                 Chest(0, new[] { S("iron", 1) }, station: new[] { "iron" }),
@@ -129,8 +134,8 @@ internal static class Program
             Check(!AnySelfMove(m2), "station target does not move into itself");
         }
 
-        // 5) Non-stackables (tools/armor) stay put unless a chest pins them.
-        Console.WriteLine("[5] non-stackables excluded unless pinned");
+        // 5) Non-stackables (tools/armor) stay put unless pinned; each consumes one empty slot.
+        Console.WriteLine("[5] non-stackables excluded unless pinned; slot-limited");
         {
             var noPin = new List<ChestView>
             {
@@ -144,10 +149,10 @@ internal static class Program
             {
                 Chest(0, new[] { S("bronzesword", 1, false) }),
                 Chest(1, new[] { S("bronzesword", 1, false) }),
-                Chest(2, pins: new[] { "bronzesword" }, room: 1), // Router.Room yields 1 for non-stackables
+                Chest(2, pins: new[] { "bronzesword" }, emptySlots: 1, maxStack: 1),
             };
             var m2 = OrganizePlanner.Plan(pinned, out _);
-            Check(m2.Count == 1 && m2[0].TgtId == 2, "one gear piece moves to the pinning chest (room=1)");
+            Check(m2.Count == 1 && m2[0].TgtId == 2, "only one sword fits the single empty slot");
         }
 
         // 6) Capacity respected; overflow stays in source.
@@ -157,28 +162,70 @@ internal static class Program
             {
                 Chest(0, new[] { S("wood", 40) }),
                 Chest(1, new[] { S("wood", 40) }),
-                Chest(2, station: new[] { "wood" }, room: 50), // home has room for only 50
+                Chest(2, station: new[] { "wood" }, emptySlots: 0,
+                      partial: new Dictionary<string, int> { { "wood", 50 } }),
             };
             var moves = OrganizePlanner.Plan(chests, out var sum);
-            Check(TotalTo(moves, 2) == 50, "exactly 50 wood delivered (capped by room)");
+            Check(TotalTo(moves, 2) == 50, "exactly 50 wood delivered (capped by partial space)");
             Check(sum.TotalItems == 50, "summary counts only delivered items");
-            int fromEach = 0; foreach (var m in moves) fromEach += m.Amount;
-            Check(fromEach == 50, "30 wood overflow left behind in source(s)");
         }
 
         // 7) Ignore / ManualOnly / Sorter chests are never targets (but can be sources).
         Console.WriteLine("[7] excluded chests are never targets, still sources");
         {
-            // excluded chest holds the most AND pins the item, yet must not be chosen
             var chests = new List<ChestView>
             {
-                Chest(0, new[] { S("wood", 100) }, pins: new[] { "wood" }, excluded: true), // e.g. sorter/Ignore/ManualOnly
+                Chest(0, new[] { S("wood", 100) }, pins: new[] { "wood" }, excluded: true),
                 Chest(1, new[] { S("wood", 1) }),
             };
             var moves = OrganizePlanner.Plan(chests, out _);
             Check(moves.Count == 1 && moves[0].TgtId == 1 && moves[0].SrcId == 0,
                 "wood flows OUT of the excluded chest (0) into the normal chest (1)");
             Check(TotalTo(moves, 0) == 0, "nothing is routed INTO the excluded chest");
+        }
+
+        // 8) Empty slots are SHARED across item types routed to one chest (no overcommit).
+        Console.WriteLine("[8] shared empty slots: preview cannot overcommit a target");
+        {
+            var chests = new List<ChestView>
+            {
+                Chest(0, new[] { S("wood", 100) }),
+                Chest(1, new[] { S("stone", 100) }),
+                Chest(2, pins: new[] { "wood", "stone" }, emptySlots: 1, maxStack: 50,
+                      partial: new Dictionary<string, int> { { "wood", 40 }, { "stone", 40 } }),
+            };
+            var moves = OrganizePlanner.Plan(chests, out var sum);
+            Check(TotalTo(moves, 2, "wood") == 90, "wood gets its partial 40 + the single slot (50) = 90");
+            Check(TotalTo(moves, 2, "stone") == 40, "stone gets only its partial 40 (slot already spent)");
+            Check(sum.TotalItems == 130, "summary promises 130, not the naive 180");
+        }
+
+        // 9) Router parity: explicit item pin beats group/sign match even when the group chest holds more.
+        Console.WriteLine("[9] item pin beats group match (no sorter ping-pong)");
+        {
+            var chests = new List<ChestView>
+            {
+                Chest(0, new[] { S("finewood", 20) }),
+                Chest(1, new[] { S("finewood", 50) }, groupPins: new[] { "finewood" }),
+                Chest(2, new[] { S("finewood", 10) }, pins: new[] { "finewood" }),
+            };
+            var moves = OrganizePlanner.Plan(chests, out _);
+            Check(MovesTo(moves, 2) == moves.Count && moves.Count > 0, "all finewood routes to the item-pin chest (2)");
+            Check(TotalTo(moves, 2) == 70, "group chest is drained into the pin chest (20+50), matching Router");
+        }
+
+        // 10) Sign priority (pN) ranks within a tier before most-held, like Router.
+        Console.WriteLine("[10] priority beats most-held within a tier");
+        {
+            var chests = new List<ChestView>
+            {
+                Chest(0, new[] { S("wood", 30) }),
+                Chest(1, new[] { S("wood", 100) }, groupPins: new[] { "wood" }, priority: 0),
+                Chest(2, new[] { S("wood", 1) }, groupPins: new[] { "wood" }, priority: 5),
+            };
+            var moves = OrganizePlanner.Plan(chests, out _);
+            Check(MovesTo(moves, 2) == moves.Count && moves.Count > 0, "p5 chest wins despite holding least");
+            Check(TotalTo(moves, 2) == 130, "both other chests drain into the p5 chest (30+100)");
         }
 
         Console.WriteLine("==========================");
