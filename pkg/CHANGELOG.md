@@ -1,7 +1,7 @@
 # Changelog
 
 ## 1.1.0
-- New **Organize** button on Sorter chests: one press sweeps every accessible chest within the sorter radius (20 m) and consolidates each item type into its best home, in place — you carry nothing
+- New **Organize** button on Sorter chests: one press sweeps every accessible chest within the sorter radius (32 m by default) and consolidates each item type into its best home, in place — you carry nothing
 - Previews first ("Organize: move N items across M chests — press again to confirm") and only runs on a second press within 5 seconds; closing the chest, opening another, or the timeout cancels it
 - Routing priority per item type: a chest that pins/filters it, then a chest whose adjacent crafting station attracts its group (forge → metals/ores, workbench → wood/hides, stonecutter → stone, cauldron → cooking/meat/seeds, black forge → metals/valuables, galdr table → valuables/meads), then the chest already holding the most of it; otherwise it stays put
 - Tools and armor (non-stackables) stay where they are unless a chest explicitly pins them
@@ -9,6 +9,7 @@
 - New server-synced `[Stations]` config section maps station names to item groups (editable; add modded stations via the `CustomStations` entry — the log prints every detected station token); new `[Organize] MovesPerTick` and `StationRange` settings
 - CAVEAT: windmills are not detectable (no station identity in game code) — pin a chest for barley/flour instead
 - Default sorter/Organize radius raised from 20 m to 32 m (existing config files keep their saved value — edit `Radius` in the cfg to adopt the new default)
+- Fixed the `ores` group never matching metal scraps (the in-game tokens are singular: ironscrap, bronzescrap, copperscrap) and wrongly claiming leather scraps via the old `*scraps` wildcard — existing config files keep their saved pattern; delete the `ores` line under `[ItemGroups]` (or paste the new default) to adopt the fix
 - This is a minor release: server and all clients must update together (a 1.1.0 client is refused by a 1.0.x server, and vice-versa)
 
 

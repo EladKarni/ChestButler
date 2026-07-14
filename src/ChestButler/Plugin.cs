@@ -60,7 +60,7 @@ namespace ChestButler
                     new ConfigurationManagerAttributes { IsAdminOnly = true }));
 
             StationRange = Config.Bind("Organize", "StationRange", 8f,
-                new ConfigDescription("Max distance (m) from a chest to a crafting station for the chest to inherit that station's item groups during Organize. Nearest station wins.",
+                new ConfigDescription("Max distance (m) from a chest to a crafting station for the chest to inherit that station's item groups during Organize. Nearest mapped station wins.",
                     new AcceptableValueRange<float>(1f, 20f),
                     new ConfigurationManagerAttributes { IsAdminOnly = true }));
 

@@ -104,7 +104,7 @@ Good to know:
 
 * A chest counts as "next to" a station within 8 m (`StationRange` setting). The nearest mapped station wins.
 * Tools, armor and other non-stackables stay where they are unless a chest pins them — same rule as the sorter.
-* The preview count is exact: capacity is checked up front and overflow simply stays in its source chest. Nothing is ever dropped or lost.
+* The preview capacity check is exact at plan time; anything that can no longer move when you confirm (a chest filled up meanwhile, or another player is using it) simply stays put. Nothing is ever dropped or lost.
 * Sorter chests are sources only — Organize empties them but never fills them.
 * Kilns, eitr refineries and cooking stations are detected but unmapped by default; windmills cannot be detected at all (the game gives them no station identity) — pin a chest for those instead.
 * Modded stations: press Organize once, copy the station token from `BepInEx/LogOutput.log` (`chest near station '$piece_...'`), and add it to the `CustomStations` setting.
@@ -124,7 +124,7 @@ The config file is `BepInEx/config/eksolutions.chestbutler.cfg`, generated on fi
 
 The `[ItemGroups]` section defines the item groups: stone, wood, ores, metals, cooking, meat, seeds, trophies, valuables, meads, ammo, hides, fuel. Every group is a comma separated list of item name tokens (wildcards allowed), so you can edit them or add entries for modded items.
 
-The `[Stations]` section maps station names to the groups they attract during Organize (for example `$piece_forge = metals, ores`). To cover a modded station, use the `CustomStations` entry with the format `token=group1,group2; token2=group3` — the exact token is printed to `BepInEx/LogOutput.log` whenever Organize detects a station it has no mapping for.
+The `[Stations]` section maps station names to the groups they attract during Organize (for example `$piece_forge = metals, ores`). To cover a modded station, use the `CustomStations` entry with the format `token=group1,group2; token2=group3` — the exact token is printed to `BepInEx/LogOutput.log` whenever a chest's nearest station has no mapping.
 
 ## Compatibility
 
@@ -148,7 +148,7 @@ Only if a chest explicitly claims them via Pin. The contains rule ignores non-st
 The first press is a preview — the button turns into `Confirm?` and a second press within 5 seconds runs it. If it says "Nothing to organize" instead, every item is already in its best spot, or the scattered items have no home yet: no chest pins them, no mapped station is near a chest, and no other chest already holds that type. Organize never moves an item to a random chest.
 
 **My chest next to the smelter (or forge) does not attract anything.**
-The chest must be within 8 m of the station (`StationRange`). After pressing Organize, `BepInEx/LogOutput.log` lists every station it saw and at what distance — if your station shows up with "has NO [Stations] mapping", it is a modded station: copy the token from that line into the `CustomStations` setting. Windmills cannot be detected (the game gives them no station identity); pin a chest for barley and flour instead.
+The chest must be within 8 m of the station (`StationRange`). After pressing Organize, `BepInEx/LogOutput.log` shows one line per chest: the nearest station that matched, or the nearest unmapped one if none did. A "has NO [Stations] mapping" line means that station has no default mapping — a modded station, or a kiln / eitr refinery / cooking station: copy the token from that line into the `CustomStations` setting. A mapped station closer to the chest wins and can hide an unmapped station's token, so read the log from a chest that sits nearest to the unmapped one. Windmills cannot be detected (the game gives them no station identity); pin a chest for barley and flour instead.
 
 **Can I add or remove the mod mid-playthrough?**
 Yes. Sorter flags and pinned filters are stored on the chests themselves and survive restarts; without the mod they are simply ignored.

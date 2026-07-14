@@ -51,6 +51,11 @@ fi
 
 # --- patch-only safety guard ---
 mm(){ printf '%s' "${1#v}" | cut -d. -f1-2; }   # -> major.minor
+if [[ "$PATCH_ONLY" == "true" && "$current" == "none" ]]; then
+  log "No state file ($STATE_FILE), so $tag cannot be verified as a safe patch update."
+  log "Seed it with the currently deployed tag first:  echo v1.0.2 > $STATE_FILE"
+  exit 0
+fi
 if [[ "$PATCH_ONLY" == "true" && "$current" != "none" && "$(mm "$tag")" != "$(mm "$current")" ]]; then
   log "New release $tag changes the minor/major version (currently $current)."
   log "Players on the old version would be locked out, so this update is being skipped."
