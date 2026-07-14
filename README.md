@@ -191,15 +191,6 @@ Distributed under the MIT License. See `LICENSE` for more information.
 
 
 
-<!-- CONTACT -->
-## Contact
-
-Elad Karni - elad.karni@gmail.com
-
-Project Link: [https://github.com/EladKarni/ChestButler](https://github.com/EladKarni/ChestButler)
-
-
-
 <!-- ACKNOWLEDGEMENTS -->
 ## Acknowledgements
 
