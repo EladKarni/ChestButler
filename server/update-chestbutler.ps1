@@ -15,6 +15,9 @@ $Repo         = "EladKarni/ChestButler"                                   # GitH
 $InstanceName = "Valheim01"                                               # your AMP instance name (ampinstmgr list)
 $PluginsDir   = "C:\AMP\Instances\Valheim01\Valheim\896660\BepInEx\plugins" # server plugins folder
 $AmpInstMgr   = "C:\Program Files\CubeCoders\AMP\ampinstmgr.exe"          # path to ampinstmgr
+$PatchOnly    = $true   # only auto-deploy patch updates (1.0.X). A minor/major bump locks out
+                        # players who have not updated, so those are skipped and left for you
+                        # to roll out together with the group (matches the Linux updater).
 # -------------------------------------------------------------------------------
 
 $ErrorActionPreference = "Stop"
@@ -45,6 +48,21 @@ try {
         Log "Already up to date ($($release.tag_name)). No restart needed."
         Remove-Item $tmp -Force
         exit 0
+    }
+
+    # Patch-only safety guard: a minor/major bump refuses old-version clients at connect
+    # (VersionStrictness.Minor), so never auto-deploy one — same policy as the Linux updater.
+    if ($PatchOnly -and (Test-Path $TargetDll)) {
+        $newMM = (($release.tag_name.TrimStart('v')) -split '\.')[0..1] -join '.'
+        $curVer = [System.Diagnostics.FileVersionInfo]::GetVersionInfo($TargetDll).FileVersion
+        $curMM = (($curVer) -split '\.')[0..1] -join '.'
+        if ($newMM -ne $curMM) {
+            Log "Release $($release.tag_name) changes the minor/major version (server is running $curVer)."
+            Log "Players on the old version would be locked out, so this update is being skipped."
+            Log "Update the clients, then deploy manually or set `$PatchOnly = `$false for one run."
+            Remove-Item $tmp -Force
+            exit 0
+        }
     }
 
     Log "New version found ($($release.tag_name)). Stopping instance '$InstanceName'..."
