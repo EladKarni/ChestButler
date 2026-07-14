@@ -57,6 +57,8 @@ This mod adds a "Sorter" toggle to chests. Anything you dump into a sorter chest
 
 It works in the other direction too. You can pin a set of items to a chest and give it a Pull button that grabs those items from nearby storage. I use this for a cooking chest next to the cauldron that restocks itself on demand.
 
+Since 1.1.0, a sorter chest can also **Organize** the whole base in one press: it previews how much would move, then consolidates every item type into its best chest, in place. Routing is station-aware — chests next to a forge attract metals and ores, the smelter chest gets ore and coal, the cauldron chest gets cooking ingredients — with the station map editable in config and modded stations supported via a log-assisted `CustomStations` entry.
+
 Some notes on how it's built: every item transfer goes through MultiUserChest's networking, which means only the actual owner of a chest ever modifies it. This is the part most sorting mods get wrong, and it's why some of them eat items on multiplayer servers. Config lives on the server and syncs to everyone, so the whole group runs the same rules.
 
 ### Built With
@@ -128,8 +130,12 @@ The project builds offline. There is no NuGet restore; every reference is a loca
 | Routing rules | `Core/Router.cs` |
 | Per-chest filters (ZDO pins) | `Core/Filters.cs`, `Core/SorterZdo.cs` |
 | Pull/restock | `Core/Puller.cs` |
+| Organize planner (pure, deterministic, no Unity deps) | `Core/OrganizePlanner.cs` |
+| Organize Unity adapter + batched execution | `Core/Organizer.cs` |
+| Station / smelter / fermenter detection | `Core/Stations.cs`, `Patches/ProcessorPatches.cs` |
 | Item groups | `Core/Groups.cs`, `Core/Names.cs` |
 | Chest UI toolbar | `Patches/GuiPatch.cs` |
+| Planner unit tests (run offline, no game needed) | `tests/OrganizePlannerTests/` — `dotnet run` |
 
 One rule matters more than any other in this codebase: never write to an inventory you don't own. All chest-to-chest moves go through MultiUserChest's request/response API, which routes the change to whichever peer owns the target chest. Writing straight into a remote chest's `Inventory` is exactly how the old Smarter Containers mod ended up deleting items, so PRs that bypass this will be rejected.
 
@@ -143,13 +149,14 @@ Buttons show up at the bottom of every chest UI:
 | Button | Shown on | Does |
 |---|---|---|
 | `Sorter: ON/OFF` | any chest | marks it as a dump chest, contents distribute when closed |
+| `Organize`, then `Confirm?` | sorter chests | previews a base-wide consolidation, second press within 5 s executes it |
 | `Pin`, then `Auto (n)`/`Manual (n)` | normal chests | saves the current contents as filters, then toggles whether the sorter fills it automatically |
 | `Clear` | chests with filters | wipes the saved filters |
 | `Pull` | chests with filters | grabs one stack of each saved item from nearby chests |
 
-Routing picks a target in this order: a chest that names the item, then a chest whose group covers it, then any chest that already holds some. Ties go to higher priority, then to whichever chest holds the most of that item, then to the nearest one. If the best chest only has room for part of a stack it gets topped off and the rest re-routes.
+Routing picks a target in this order: a chest that names the item, then a chest whose group covers it, then any chest that already holds some. Ties go to higher priority, then to whichever chest holds the most of that item, then to the nearest one. If the best chest only has room for part of a stack it gets topped off and the rest re-routes. Organize uses the same ranking plus a station-adjacency tier (after pins/groups, before most-held), decides one winning chest per item type, and is capacity-exact so its preview never overpromises.
 
-Config is in `BepInEx/config/eksolutions.chestbutler.cfg`: sorting radius (20 m default), tick rate, stacks per tick, the contains fallback, and all the item groups under `[ItemGroups]`. The server's values win and sync to clients.
+Config is in `BepInEx/config/eksolutions.chestbutler.cfg`: sorting radius (32 m default, shared with Organize), tick rate, stacks per tick, the contains fallback, the `[Stations]` map (+ `CustomStations` for modded ones), Organize's `MovesPerTick`/`StationRange`, and all the item groups under `[ItemGroups]`. The server's values win and sync to clients.
 
 
 

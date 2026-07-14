@@ -1,14 +1,17 @@
 # ChestButler
 
-Sorts your storage for you. Mark a chest as a Sorter, dump everything into it, close the lid, and the items get moved to the right chests around your base.
-
-| [Features](#features) | [Quick Start](#quick-start) | [Installing](#installing) | [Usage](#usage) | [Configuration](#configuration) | [Compatibility](#compatibility) | [FAQ](#faq) | [Links](#links) |
-| --------------------- | --------------------------- | ------------------------- | --------------- | ------------------------------- | ------------------------------- | ----------- | --------------- |
+Sorts your storage for you. Mark a chest as a Sorter, dump everything into it, close the lid, and the items get moved to the right chests around your base. Or press **Organize** and tidy the whole base in one go.
 
 ## Features
 
 **Sorter chests**
 Toggle any chest into a dump chest with one button. Anything inside gets distributed to nearby chests the moment you close it. Items that no chest wants stay in the sorter, so nothing is ever lost or dropped.
+
+**Organize your whole base** *(new in 1.1.0)*
+Sorter chests get an **Organize** button. One press scans every chest in range and previews what would move; press again and every item type consolidates into its best home, in place — you carry nothing. Perfect for adopting the mod on an established, messy base.
+
+**Station-aware routing** *(new in 1.1.0)*
+During Organize, a chest sitting next to a crafting station attracts that station's materials: metals and ores pool by the forge, cooking ingredients by the cauldron, wood by the workbench, ore and coal by the smelter, meads by the fermenter. The map is editable in config, and modded stations can be added without a rebuild.
 
 **Works with zero setup**
 Chests attract items they already hold, fullest chest first. Dump ore after a mining trip and it lands wherever your ore already lives.
@@ -20,7 +23,7 @@ Put sample items in a chest and press Pin. That chest now claims those item type
 Chests with filters get a Pull button that fetches one stack of each saved item from surrounding storage. Useful for a cooking chest next to the cauldron: press Pull, start cooking.
 
 **Safe in multiplayer**
-Every transfer runs through MultiUserChest's networking, so only the actual owner of a chest modifies it. No duped stacks, no vanishing items, even with several people using the same storage room.
+Every transfer — sorting, Pull, and Organize — runs through MultiUserChest's networking, so only the actual owner of a chest modifies it. No duped stacks, no vanishing items, even with several people using the same storage room.
 
 ## Quick Start
 
@@ -28,6 +31,7 @@ Every transfer runs through MultiUserChest's networking, so only the actual owne
 2. Dump your whole inventory into it and close the chest.
 3. Watch the items fly to whichever chests already hold that item type.
 4. For a dedicated chest (for example carrots and onions near the cauldron): put samples in, press `Pin`, and from then on the sorter routes those items there. Press `Pull` any time to grab a stack of each back from storage.
+5. Messy base already? Press `Organize` in the sorter chest. It previews how much would move ("move 340 items across 12 chests"), the button turns into `Confirm?`, and a second press runs it — every item type consolidates into its best chest, station materials pool next to their stations.
 
 ## Installing
 
@@ -65,18 +69,45 @@ On a managed host (for example CubeCoders AMP): enable the BepInEx option in the
 
 ## Usage
 
-Four buttons appear at the bottom of the chest UI:
+Buttons appear at the bottom of the chest UI:
 
 | Button | Appears on | What it does |
 | ------ | ---------- | ------------ |
 | `Sorter: ON/OFF` | any chest | makes it a dump chest; contents distribute when you close it |
+| `Organize` | sorter chests | sweeps every chest in range and consolidates each item type into its best home; first press previews and turns the button into `Confirm?`, second press (within 5 s) runs it |
 | `Pin` / `Auto (n)` / `Manual (n)` | normal chests | Pin saves the current contents as filters. After that the same button toggles Auto (sorter fills this chest) vs Manual (only Pull fills it) |
 | `Clear` | chests with filters | erases the saved filters |
 | `Pull` | chests with filters | fetches one stack of each saved item type from nearby chests |
 
 ### How a target chest is picked
 
-For each item, in order: a chest that pins the item wins first, then a chest whose group covers it, then any chest that already contains some. Ties go to the chest holding the most of that item, then to the nearest one. If the best chest only has room for part of a stack, it gets topped off and the rest re-routes to the next candidate.
+For each item, in order: a chest that pins the item wins first, then a chest whose group covers it, then any chest that already contains some. Ties go to higher sign priority, then to the chest holding the most of that item, then to the nearest one. If the best chest only has room for part of a stack, it gets topped off and the rest re-routes to the next candidate.
+
+### Organize: one-press base cleanup
+
+Organize uses the same ranking with one extra tier: after pins and groups, a chest sitting next to a **crafting station** claims that station's materials, and only then does the most-held rule apply. Each item type gets exactly one winning chest, so nothing ping-pongs.
+
+Default station map (editable in config under `[Stations]`):
+
+| Station | Attracts |
+| ------- | -------- |
+| Forge | metals, ores |
+| Workbench | wood, hides |
+| Stonecutter | stone |
+| Cauldron | cooking, meat, seeds |
+| Fermenter | meads |
+| Black forge | metals, valuables |
+| Galdr table | valuables, meads |
+| Smelter / Blast furnace | ores, fuel (coal) |
+
+Good to know:
+
+* A chest counts as "next to" a station within 8 m (`StationRange` setting). The nearest mapped station wins.
+* Tools, armor and other non-stackables stay where they are unless a chest pins them — same rule as the sorter.
+* The preview count is exact: capacity is checked up front and overflow simply stays in its source chest. Nothing is ever dropped or lost.
+* Sorter chests are sources only — Organize empties them but never fills them.
+* Kilns, eitr refineries and cooking stations are detected but unmapped by default; windmills cannot be detected at all (the game gives them no station identity) — pin a chest for those instead.
+* Modded stations: press Organize once, copy the station token from `BepInEx/LogOutput.log` (`chest near station '$piece_...'`), and add it to the `CustomStations` setting.
 
 ## Configuration
 
@@ -84,12 +115,16 @@ The config file is `BepInEx/config/eksolutions.chestbutler.cfg`, generated on fi
 
 | Setting | Default | Description |
 | ------- | ------- | ----------- |
-| Radius | 20 | how far (meters) a sorter looks for target chests (5 to 60) |
-| TransferInterval | 1.0 | seconds between transfer ticks per sorter (0.2 to 10) |
-| StacksPerTick | 2 | item stacks moved per tick (1 to 8); raise both for faster sorting |
-| ContainsFallback | true | route items to chests that already contain them when no filter matches |
+| [Sorting] Radius | 32 | how far (meters) a sorter looks for target chests — also the Organize sweep range (5 to 60) |
+| [Sorting] TransferInterval | 1.0 | seconds between transfer ticks per sorter (0.2 to 10) |
+| [Sorting] StacksPerTick | 2 | item stacks moved per tick (1 to 8); raise both for faster sorting |
+| [Sorting] ContainsFallback | true | route items to chests that already contain them when no filter matches |
+| [Organize] MovesPerTick | 4 | item moves per frame while an Organize run executes (1 to 16) |
+| [Organize] StationRange | 8 | how close (meters) a chest must be to a station to inherit its materials (1 to 20) |
 
-The `[ItemGroups]` section defines the item groups: stone, wood, ores, metals, cooking, meat, seeds, trophies, valuables, meads, ammo, hides. Every group is a comma separated list of item name tokens (wildcards allowed), so you can edit them or add entries for modded items.
+The `[ItemGroups]` section defines the item groups: stone, wood, ores, metals, cooking, meat, seeds, trophies, valuables, meads, ammo, hides, fuel. Every group is a comma separated list of item name tokens (wildcards allowed), so you can edit them or add entries for modded items.
+
+The `[Stations]` section maps station names to the groups they attract during Organize (for example `$piece_forge = metals, ores`). To cover a modded station, use the `CustomStations` entry with the format `token=group1,group2; token2=group3` — the exact token is printed to `BepInEx/LogOutput.log` whenever Organize detects a station it has no mapping for.
 
 ## Compatibility
 
@@ -107,7 +142,13 @@ No. An item never exists in two places: each move is packed into a request, exec
 No. Valheim only simulates loaded areas, so sorting runs while someone is around, which in practice is exactly when you are dumping loot.
 
 **Do tools, armor and other non-stackable items get moved?**
-Only if a chest explicitly claims them via Pin. The contains rule ignores non-stackables on purpose, so your spare gear does not wander around.
+Only if a chest explicitly claims them via Pin. The contains rule ignores non-stackables on purpose, so your spare gear does not wander around. Organize follows the same rule.
+
+**I pressed Organize and nothing moved.**
+The first press is a preview — the button turns into `Confirm?` and a second press within 5 seconds runs it. If it says "Nothing to organize" instead, every item is already in its best spot, or the scattered items have no home yet: no chest pins them, no mapped station is near a chest, and no other chest already holds that type. Organize never moves an item to a random chest.
+
+**My chest next to the smelter (or forge) does not attract anything.**
+The chest must be within 8 m of the station (`StationRange`). After pressing Organize, `BepInEx/LogOutput.log` lists every station it saw and at what distance — if your station shows up with "has NO [Stations] mapping", it is a modded station: copy the token from that line into the `CustomStations` setting. Windmills cannot be detected (the game gives them no station identity); pin a chest for barley and flour instead.
 
 **Can I add or remove the mod mid-playthrough?**
 Yes. Sorter flags and pinned filters are stored on the chests themselves and survive restarts; without the mod they are simply ignored.

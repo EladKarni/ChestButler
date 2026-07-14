@@ -35,7 +35,7 @@ namespace ChestButler
             Instance = this;
             Log = Logger;
 
-            SorterRadius = Config.Bind("Sorting", "Radius", 20f,
+            SorterRadius = Config.Bind("Sorting", "Radius", 32f,
                 new ConfigDescription("Radius (m) around a sorter chest in which target chests are searched.",
                     new AcceptableValueRange<float>(5f, 60f),
                     new ConfigurationManagerAttributes { IsAdminOnly = true }));
