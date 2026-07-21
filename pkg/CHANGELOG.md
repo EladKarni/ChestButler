@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.1.1
+- Dependency pin updated to Jotunn 2.29.2 to match the server (no gameplay changes)
+- Default sorter/Organize radius raised to 128 m (max raised to 128). Existing config files keep their saved `Radius`; on a server the admin value is authoritative and syncs to clients, so set the server's `Radius` to 128 to apply it for everyone
+
 ## 1.1.0
 - New **Organize** button on Sorter chests: one press sweeps every accessible chest within the sorter radius (32 m by default) and consolidates each item type into its best home, in place — you carry nothing
 - Previews first ("Organize: move N items across M chests — press again to confirm") and only runs on a second press within 5 seconds; closing the chest, opening another, or the timeout cancels it
