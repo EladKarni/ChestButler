@@ -17,7 +17,7 @@ namespace ChestButler
     {
         public const string ModGuid = "eksolutions.chestbutler";
         public const string ModName = "ChestButler";
-        public const string ModVersion = "1.1.0";
+        public const string ModVersion = "1.1.1";
 
         internal static Plugin Instance;          // for StartCoroutine (Organize execution)
         internal static ManualLogSource Log;
@@ -35,9 +35,9 @@ namespace ChestButler
             Instance = this;
             Log = Logger;
 
-            SorterRadius = Config.Bind("Sorting", "Radius", 32f,
+            SorterRadius = Config.Bind("Sorting", "Radius", 128f,
                 new ConfigDescription("Radius (m) around a sorter chest in which target chests are searched.",
-                    new AcceptableValueRange<float>(5f, 60f),
+                    new AcceptableValueRange<float>(5f, 128f),
                     new ConfigurationManagerAttributes { IsAdminOnly = true }));
 
             TransferInterval = Config.Bind("Sorting", "TransferInterval", 1.0f,

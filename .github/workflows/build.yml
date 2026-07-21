@@ -49,7 +49,7 @@ jobs:
         run: |
           mkdir -p deps libs
           curl -sSL -o deps/bepinex.zip https://thunderstore.io/package/download/denikson/BepInExPack_Valheim/5.4.2333/
-          curl -sSL -o deps/jotunn.zip  https://thunderstore.io/package/download/ValheimModding/Jotunn/2.29.1/
+          curl -sSL -o deps/jotunn.zip  https://thunderstore.io/package/download/ValheimModding/Jotunn/2.29.2/
           curl -sSL -o deps/muc.zip     https://thunderstore.io/package/download/MSchmoecker/MultiUserChest/0.6.1/
           for z in deps/*.zip; do unzip -oq "$z" -d "${z%.zip}"; done
           find deps -name BepInEx.dll        -exec cp {} libs/ \;

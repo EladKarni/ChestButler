@@ -115,7 +115,7 @@ The config file is `BepInEx/config/eksolutions.chestbutler.cfg`, generated on fi
 
 | Setting | Default | Description |
 | ------- | ------- | ----------- |
-| [Sorting] Radius | 32 | how far (meters) a sorter looks for target chests — also the Organize sweep range (5 to 60) |
+| [Sorting] Radius | 128 | how far (meters) a sorter looks for target chests — also the Organize sweep range (5 to 128) |
 | [Sorting] TransferInterval | 1.0 | seconds between transfer ticks per sorter (0.2 to 10) |
 | [Sorting] StacksPerTick | 2 | item stacks moved per tick (1 to 8); raise both for faster sorting |
 | [Sorting] ContainsFallback | true | route items to chests that already contain them when no filter matches |

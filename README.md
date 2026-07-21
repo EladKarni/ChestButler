@@ -155,7 +155,7 @@ Buttons show up at the bottom of every chest UI:
 
 Routing picks a target in this order: a chest that names the item, then a chest whose group covers it, then any chest that already holds some. Ties go to higher priority, then to whichever chest holds the most of that item, then to the nearest one. If the best chest only has room for part of a stack it gets topped off and the rest re-routes. Organize uses the same ranking plus a station-adjacency tier (after pins/groups, before most-held), decides one winning chest per item type, and checks capacity slot-accurately at plan time — anything that can no longer move at confirm simply stays put.
 
-Config is in `BepInEx/config/eksolutions.chestbutler.cfg`: sorting radius (32 m default, shared with Organize), tick rate, stacks per tick, the contains fallback, the `[Stations]` map (+ `CustomStations` for modded ones), Organize's `MovesPerTick`/`StationRange`, and all the item groups under `[ItemGroups]`. The server's values win and sync to clients.
+Config is in `BepInEx/config/eksolutions.chestbutler.cfg`: sorting radius (128 m default, shared with Organize), tick rate, stacks per tick, the contains fallback, the `[Stations]` map (+ `CustomStations` for modded ones), Organize's `MovesPerTick`/`StationRange`, and all the item groups under `[ItemGroups]`. The server's values win and sync to clients.
 
 
 
