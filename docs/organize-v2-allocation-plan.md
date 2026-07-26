@@ -408,3 +408,150 @@ The one-press path (§1–§14) ships in 2.0 and is the contract.
 
 **Design target: assume a 400+ chest base until measured.** The real worst case is unvalidated, so build
 for it — any O(chests²) pass or per-chest allocation in the hot path is a defect, not a nit.
+
+## 16. Allocator audit — required corrections to §4/§5/§6
+
+Three independent hostile reviews of the allocation math, the execution phase and the 400-chest scale
+target. Everything below is traced to code or arithmetic. **§16.1 breaks the design's own acceptance
+test and must be fixed before W1 starts; §16.2 is an item-loss set; §16.3 is scale.**
+
+### 16.1 The allocator has no fixed point (BLOCKER — invalidates §7, §13 and the §12 re-run test)
+
+**Nothing persists a claimed home.** §4 step 4 requires an *empty* chest to claim, and run 1 makes its
+own claimed chests non-empty. Nothing is written to the claimed chest's ZDO — no pin, no sign, no
+station — so on run 2 it is just a non-empty free chest, preference (a)/(b) skip it, and a **fresh**
+empty chest is claimed instead; §4 step 6 then relocates the whole spill.
+
+Worked: bucket `wood` = 2,000 Wood + 37 FineWood + 12 RoundLog = 42 slots. Anchor A (24 slots, `sort:
+wood` sign) + claimed empty B. Run 2 claims C and moves 849 items B→C. Run 3 claims D. **A bucket with
+no anchor at all relocates 100% of itself on every press, forever.** This directly refutes §7 ("a second
+Organize produces near-zero moves"), §13 ("correctly-placed items stay") and §12's acceptance test.
+
+**Required fix:** persist the claim. A new `psort_home` ZDO string key on the chest (same pattern as
+`psort_items`/`psort_manual` in `Filters`), written when a chest is claimed as a bucket home, read as an
+anchor in §4 step 2, cleared by the existing Clear button. **Without this the allocator does not
+converge and v2 is worse than v1.** Add it to §8's file list and to the roadmap's W1 ownership.
+
+### 16.2 Item-loss and duplication set (all in scope for 2.0)
+
+1. **No in-flight guard on `Organizer.Execute`** — it unconditionally `StartCoroutine(Run(plan))`. Press
+   Organize on sorter A (a 400-chest run is tens of seconds), then on sorter B: B's `BuildPlan` cannot
+   see A's in-flight moves (our `to=(-1,-1)` calls create no `InventoryBlock`, §15.6), so both issue a
+   remove for the same stack. *Fix: one `static bool _running`, cleared in a `finally`.* This was listed
+   as a tidy-mode guard in §15.5 — it is required for the **one-press** path.
+2. **`tgt.IsInUse()` is a local flag.** A remote player browsing chest X sets `m_inUse` on *their*
+   client; our copy reads false, we `ClaimOwnership()`, and their deposit is never saved (owner-gated
+   `Container.Save`). The comment "don't yank ownership" documents a guarantee the check cannot provide.
+   *Fix: gate on `tgtNv.GetZDO().GetOwner()` being us or nobody, re-checked immediately before the claim.*
+3. **Destination over-commit.** `Router.Room` is re-checked per move but never **debited**, and in-flight
+   adds are not reflected locally. Three 50-wood moves into a chest with one free slot all pass. The
+   source owner has already applied the remove. *Fix: a per-run `roomLeft[target]` ledger debited at
+   issue time — the cheap half of §15.6.*
+4. **Source ZDO is never validated.** `Run` checks `tgtNv.IsValid()` but nothing for the source. A chest
+   destroyed mid-run spills its contents as ground drops on its owner while we issue a remove against
+   the dying ZDO. *Fix: re-resolve both endpoints by uid immediately before issue.*
+5. **The §14 retry queue has no termination rule** — and §10's claimed proof cites the `MaxPasses` cap
+   that §14 deleted. Three non-terminating generators: NG+ mixed-`worldLevel` stacks that can never
+   merge (planner budgets `emptyLeft × maxStack`, `Router.Room` returns 0 forever); a two-chest eviction
+   cycle with no spare slots; a target a player leaves open. *Fix: per-move attempt counter (N=2) and
+   drop the queue if a full drain yields zero successful issues.*
+6. **Confirm executes the stale preview.** `OnOrganizeClick` runs `Organizer.Execute(_pendingPlan)` with
+   no re-plan, on a census up to 5.5 s old, then executes it for minutes. `movedItems` counts *issued*
+   amounts, not completed ones — both numbers shown to the player can overstate. *Fix: re-plan on
+   confirm (100–500 ms, once) and report successes.*
+7. **Wards and access are plan-time only.** Neither `PrivateArea.CheckAccess` nor `PlayerCanAccess` is
+   re-checked in `Run`, so a ward raised mid-run is bypassed via `ClaimOwnership` + MUC.
+8. **§15.9's multi-sorter claim stamp moves into 2.0.** Two players with overlapping 128 m radii each
+   pressing Organize is the same race as tidy mode; `BuildPlan` is an unreserved radius query.
+
+### 16.3 Scale corrections (design target: 400+ chests)
+
+**§15.2's estimate was low and profiled the wrong path.** Measured against the code at C=400, S=35:
+
+- `Organizer.BuildPlan` is **0.6–2 s** (2–5 s with a trophy hall), **synchronous in the click handler** —
+  plus 14 MB of churn (85 MB gear-heavy) and 1–3 GC pauses. Freeze is user-visible at ~150 chests.
+  Missing from §15.2's list: `AnyTargetPins` is O(C·P) **per non-stackable stack** (8 M `Names.Matches`
+  for a trophy hall), `HeldOf` is called twice per chest in the Holds tier, and `Names.Matches` uses
+  culture-sensitive `StartsWith`/`EndsWith`.
+- **The path that actually breaks the game is the sorter tick, which §15.2 does not cost at all.**
+  `SorterBehaviour` decrements `budget--` *after* the "no target" check, so every homeless item costs a
+  full `ContainerTracker.Candidates` sweep every second — and a sorter chest full of homeless items is
+  the steady state. 32 items × 2 ms × 20 sorters ≈ **1.28 s of CPU per second**. Visible at ~150 chests.
+- `Filters.GetSpec` → `ParseNearestSign` → `NearestTo` is **O(C²)** and lands on the tick path, where
+  `CacheTtl = 3 f` against a 1 s tick guarantees cold misses: ~19 M distance ops/s and ~480 k string
+  allocations/s at 400 chests once players use signs.
+- **`OrganizeMovesPerTick` is in the wrong unit.** Per-*frame* means the RPC rate is framerate-dependent:
+  4/tick at 60 fps = 240 RPC/s; 16/tick at 144 fps = 2,304 RPC/s from one client. *Replace with
+  `OrganizeMovesPerSecond` (default 25, range 5–100) plus `OrganizeMaxMovesPerRun` (default 500, "press
+  again to continue"), and cap outstanding requests at ~8 with a deadline.*
+- **Config surface:** every entry is `IsAdminOnly`, so a non-admin on a dedicated server cannot turn down
+  a mod costing them 40 fps — un-admin-lock the client-side perf knobs. `TransferInterval`'s 0.2 s floor
+  is the worst value in the file (20 sorters = 100 ticks/s). `StationRange` is misleading: it changes no
+  cost, since `GroupsForChest` scans every station regardless.
+- **If the Dedicated Sorter Chest (W3) ships, sorter count scales with base size** and total cost becomes
+  O(C²). Hoist `Candidates` into one shared per-tick spatial cache before that piece ships.
+
+### 16.4 Classification corrections to §5
+
+1. **Ungrouped stackables get a chest each.** §5.4 gives every ungrouped type its own bucket, and §4
+   step 4 claims a chest for any bucket with demand ≥ 1. 40+ vanilla items match none of the 13 default
+   groups (Resin, Feathers, Guck, Chain, Crystal, Tar, Eitr, the four bombs, most cooked dishes…), so
+   3 Queen Bees + 1 Wisp + 12 Resin claim **three 24-slot chests for 16 items**, and the ungrouped
+   buckets eat 40–70 chests before `wood` gets anything. They are also string-keyed, so §4 step 3's
+   "bucket enum order" tie-break does not apply to them at all. *Fix: a `misc` catch-all; promote a type
+   to its own bucket only when its demand exceeds one chest.*
+2. **Anchor capacity is subtracted once per bucket it anchors.** `$piece_cauldron = "cooking, meat,
+   seeds"` → one 24-slot kitchen chest is seeded into three buckets and 24 slots are subtracted from
+   each, so **nothing claims a free chest** and ~2,400 items are reported homeless while 200 empty chests
+   sit two rooms away. `Filters.PinContents` makes it worse: it pins every distinct type present, so a
+   chest pinned while holding 20 types anchors 20 buckets = 480 phantom slots. *Fix: allocate **slots**,
+   not chests — one `remainingSlots[chestId]` debited once, in step-3 order.*
+3. **Group overlap exists in the shipped defaults.** `FlametalOre` matches `ores`' `*ore` **and**
+   `metals`' `flametal*`; smelter and forge chests both legitimately claim it. The "fixed group order"
+   §5.2/§13 defer to does not exist, and it must **not** be dictionary iteration order (hash-bucket
+   order changes when a group is added — that would relocate the entire ores/metals bucket after a mod
+   update). *Fix: an explicit `static readonly string[] GroupOrder` literal + a unit test asserting it
+   covers every group.*
+4. **Gear classification has no existing mechanism and misfiles by its own spec.** No `m_itemType`
+   reference exists anywhere in `src/`; `[ItemGroups]` is a name-token matcher and cannot express "all
+   `ItemType.Tool`". §5.3 ships an unresolved question ("pickaxe is a weapon? verify") — pickaxes use
+   the Pickaxes *weapon* skill, so as written they file with Frostner. And "plus anything left
+   non-stackable" makes tools a trash bucket: a **Dragon Egg** files with your hoes, and modded gear is
+   silently misfiled rather than logged, because the catch-all means nothing is ever "unmapped". *Fix:
+   make the three gear buckets token-driven like every other group, seeded from an `m_itemType` map, and
+   give the catch-all its own `gearmisc` bucket that logs every type it absorbs.*
+5. **`sort: off` does not protect a chest's contents.** `ExcludedAsTarget` is tested in `AnyTargetPins`
+   and `PickBest` but **not in the stack-enrollment loop**, so an Ignore/ManualOnly chest is still
+   enrolled as a *source*. §4's wording ("excluded as targets entirely") matches the code and is the
+   bug. A personal stash marked `sort: off` is emptied into the communal base on the first press. v1 is
+   milder (it only moved items that already had a home); v2 organizes everything, so this escalates from
+   "sometimes leaks" to "always loots". *Fix: one line — `if (c.ExcludedAsTarget) continue;` in
+   enrollment. Decide deliberately whether `ManualOnly` is source-exempt too; `Ignore` unambiguously is.*
+6. **Dead anchors permanently remove chests from the free pool, silently.** A mistyped sign (`sort:
+   metal` — not a group, so it becomes an *item token* that nothing matches), a custom group name (the
+   `[ItemGroups]` binder only reads the 13 hardcoded keys, so user-added groups are orphans), a
+   `CustomStations` value naming a nonexistent group, or a stale pin from `PinContents` — each makes a
+   chest an anchor for a bucket with zero demand, never repurposed. *Fix: define an anchor as "matches at
+   least one item present in the census"; warn on sign tokens matching neither a group nor any item.*
+7. **Determinism is unimplementable as specified.** §4 promises "distance ties broken by ZDO uid
+   (stable)", but `ContainerTracker.Candidates` iterates a `HashSet` (zone-load order), discards the
+   distances and uses the **unstable** `Array.Sort`, and `ChestView` has no uid field — nor does §8 add
+   one. A symmetric hall with chests at ±3.00 m is the normal build, and the winner flips between
+   sessions. `Stations.GroupsForChest` has the same defect (strict `<` over `m_allStations` in Awake
+   order), so a chest equidistant between a forge and a stonecutter changes bucket across relogs. *Fix:
+   add `ZdoUid` to `ChestView`; sort by `(distance, uid)` with a comparator in both places.*
+8. **Execution silently drops moves and reports success.** `Run` has five `continue` paths that abandon a
+   move and count nothing; §4 step 5's shortfall report is computed at plan time, so it reads 0 for
+   exactly the runtime failures. A co-op partner idling in the `metals` chest means 720 Iron never moves
+   and the player is told "Organized 1,340 items". *Fix: `skipped`/`skippedItems` counters in the message;
+   emit eviction moves before fill moves for the same target regardless of bucket size.*
+
+### 16.5 What §12's tests cannot catch
+§12 exercises `OrganizePlanner` over POD `ChestView`s with test-supplied delegates. **Every finding in
+§16.2 except the NG+ case passes a green §12 suite unchanged** — they live in the Unity adapter, the MUC
+seam, or multiplayer. Worse, §12's "re-run stability" test feeds back a census in which every planned
+move succeeded, which is precisely the assumption §16.2.3–5 break: it will certify §7's determinism while
+the shipped code re-plans unexecutable moves forever. **Required additions:** (a) a planner case with one
+empty slot, `maxStack` 50 and three unmergeable 20-count stacks, asserting no over-budgeted moves; (b) a
+two-client dedicated-server session over one messy shared hall — that single 10-minute test exercises
+§16.2.1, .2, .3, .4, .7 and .8.
