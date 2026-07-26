@@ -30,7 +30,7 @@ Four features, shipped together as one coordinated major release:
 
 | # | Workstream | OWNS (new / rewritten) | TOUCHES (shared) | reads-only | depends on |
 |---|---|---|---|---|---|
-| W1 | Organize v2 | `Core/OrganizePlanner.cs` (rewrite), `Core/Organizer.cs` (rewrite), `Core/Gear.cs` (new), `tests/OrganizePlannerTests/**` | `Plugin.cs` (`[Organize]` config block + `OrganizeConfig.Init`), `Core/Groups.cs`, `Core/Stations.cs`, `Core/ContainerTracker.cs` (append-only accessors), `Core/Router.cs` (station-tier parity — v2 §15.8), `Patches/GuiPatch.cs` (**scoped**: `OnOrganizeClick` + `ClearPending` + preview string + empty-chest Manual/Ignore toggle) | Filters, Names, SorterZdo | — |
+| W1 | Organize v2 | `Core/OrganizePlanner.cs` (rewrite), `Core/Organizer.cs` (rewrite), `Core/Gear.cs` (new), `tests/OrganizePlannerTests/**` | `Plugin.cs` (`[Organize]` config block + `OrganizeConfig.Init`), `Core/Groups.cs`, `Core/Stations.cs`, `Core/ContainerTracker.cs` (append-only accessors), `Core/Router.cs` (station-tier parity — v2 §15.8), `Core/Filters.cs` (new `psort_home` ZDO key — v2 §16.1), `Patches/GuiPatch.cs` (**scoped**: `OnOrganizeClick` + `ClearPending` + preview string + empty-chest Manual/Ignore toggle) | Names, SorterZdo | — |
 | W2 | Gather | `Patches/GatherPatch.cs` (new), `Core/Gatherer.cs` (new) | `Plugin.cs` (one-line `Gather.Init`), `Core/Puller.cs` (only if a shared chest→player helper is needed) | ContainerTracker, Names, Puller/MUC pattern | — |
 | W3 | Sorter Chest | `Core/SorterChestPiece.cs` (new) + icon asset | `Plugin.cs` (one-line `SorterChestPiece.Register`), `Core/SorterZdo.cs` (default-flag helpers), `src/ChestButler/ChestButler.csproj` (icon resource, if not glob-compiled) | ContainerPatches, Jötunn PieceManager | **W1** (allocator must treat default-sorter chests as claimable targets) |
 | W4 | Gamepad | `Patches/GuiPatch.cs` (edit), `Patches/GatherPatch.cs` (edit) | — | — | **W1 + W2** (buttons must exist) |
@@ -175,6 +175,13 @@ the MultiUserChest source and two of its first-draft mechanisms were refuted; th
   toggle — all of which stand on their own. The 2.1 prerequisites are listed in v2 plan §15.5/§15.7/§15.9.
 - **Design target: assume a 400+ chest base until measured.** We cannot validate the real worst case yet,
   so build for it — every O(chests²) or per-chest-allocating path in the plan is a defect, not a nit.
+- **BLOCKER — read v2 plan §16 before starting.** A three-way audit of the allocator found that it has
+  **no fixed point**: nothing persists a claimed chest as a bucket home, so run 2 claims a *different*
+  empty chest and relocates the whole spill, forever. That refutes the plan's own §7/§13 and its §12
+  acceptance test. The fix is a new `psort_home` ZDO key written on claim and read as an anchor — hence
+  `Core/Filters.cs` in W1's TOUCHES. §16 also carries eight item-loss/duplication findings (§16.2), the
+  corrected scale numbers (§16.3), and eight classification defects (§16.4) including `sort: off` chests
+  being looted, anchor capacity double-counted across buckets, and ungrouped items eating 40–70 chests.
 
 ### W2 — Gather (settled design)
 A **Gather** button beside `m_craftButton` in InventoryGui's crafting panel, on all crafting stations,
@@ -286,11 +293,33 @@ either 64 m or 128 m and we are currently shipping 128. Do those first. #8 is wo
 answer is "we don't have a base that big yet": record the number of chests, so the 400+ design target
 stays an explicit assumption rather than a forgotten one.
 
+## 9b. Ship 1.1.2 first (recommended)
+
+The audit found 18 defects in **shipping 1.1.1** that do not depend on Organize v2 — see
+`docs/known-issues-1.1.x.md`. They are client-side behaviour and config, cross-compatible with 1.1.x, so
+they ship as a **patch through the `PATCH_ONLY` server updater with no coordinated release** — none of
+2.0's deployment cost.
+
+Why do it before 2.0 rather than folding it in:
+- Six of them (`sort: off` chests enrolled as sources, the missing in-flight guard, the local-only
+  `IsInUse` check, destination over-commit, unstable tie-breaks, the `budget--` placement in the sorter
+  tick) are **load-bearing for the v2 allocator**. Fixing them in 1.1.2 shrinks W1 and gives W1 a clean
+  baseline instead of a rewrite stacked on known-broken behaviour.
+- The two worst are one-line fixes (`budget--` above the null check; `Player.m_localPlayer == null`
+  early-return in the tick) and are estimated to be user-visible from ~150 chests.
+- It is a single-agent, single-branch job with no parallelization problem to solve.
+
+Do it as `fix/1.1.2` off `dev`, integrator-owned versioning as usual, then rebase Wave 0 on top.
+
 ## 10. Next actions
-1. **Land Wave 0 on `dev` — now recommended, not optional** (§5): init stubs, `[Organize]` config
+1. **Ship 1.1.2** (§9b) — `docs/known-issues-1.1.x.md`. Independent of everything else, auto-deploys.
+2. **Land Wave 0 on `dev` — now recommended, not optional** (§5): init stubs, `[Organize]` config
    relocation, two `SorterZdo` stubs, three append-only accessors, csproj check.
-2. Fill in the §9 pre-flight table (owner, manual).
-3. Generate the three Wave-1 handoff prompts (W1 has a plan; write W2 Gather + W3 Sorter-Chest plans),
+3. Fill in the §9 pre-flight table (owner, manual).
+4. **Resolve v2 plan §16.1 (the allocator's missing fixed point) in the spec before W1 starts** — the
+   `psort_home` key changes §4's allocation steps and §8's file list, so it is a plan edit, not a code
+   decision to defer to the agent.
+5. Generate the three Wave-1 handoff prompts (W1 has a plan; write W2 Gather + W3 Sorter-Chest plans),
    plus the W4 Gamepad prompt — each self-contained, per §6. **W1's prompt must state explicitly** that
    §11 of the v2 allocation plan is superseded (no version bump, no changelog, no `./build.sh`).
-4. Launch W1/W2/W3 agents on their branches; integrate per §5; then W4; then release-prep to 2.0.0.
+6. Launch W1/W2/W3 agents on their branches; integrate per §5; then W4; then release-prep to 2.0.0.
