@@ -62,18 +62,29 @@ namespace ChestButler.Core
             return nv != null && nv.IsValid();
         }
 
+        // 1.1.2: the prune below used to run on EVERY registration, making a zone load O(P^2) in the
+        // number of tracked processors. Amortize it instead — the dead keys it collects are cheap to
+        // carry for a few more registrations, and GroupsForChest prunes on scan as well.
+        private const int PruneEvery = 64;
+        private static int _sinceLastPrune;
+
         internal static void RegisterProcessor(Component c, string mName)
         {
             if (c == null || string.IsNullOrEmpty(mName) || !IsReal(c)) return;   // skip placement ghosts
+
             // Opportunistic prune: zone unload destroys pieces WITHOUT firing OnDestroyed, and a
             // dedicated server (or a client that never presses Organize) would otherwise accumulate
             // dead keys forever. Registration happens exactly when zones load, so this stays amortized.
-            foreach (var kv in Processors)
-                if (kv.Key == null) Dead.Add(kv.Key);
-            if (Dead.Count > 0)
+            if (++_sinceLastPrune >= PruneEvery)
             {
-                foreach (var d in Dead) Processors.Remove(d);
-                Dead.Clear();
+                _sinceLastPrune = 0;
+                foreach (var kv in Processors)
+                    if (kv.Key == null) Dead.Add(kv.Key);
+                if (Dead.Count > 0)
+                {
+                    foreach (var d in Dead) Processors.Remove(d);
+                    Dead.Clear();
+                }
             }
             Processors[c] = mName;
         }
@@ -132,6 +143,26 @@ namespace ChestButler.Core
                     if (groups.Count > 0) Parsed[token] = groups;
                 }
             }
+
+            Validate();
+        }
+
+        /// <summary>1.1.2: a station mapped to a group name that does not exist in [ItemGroups] — a
+        /// typo, or a group the user renamed — silently attracts nothing, and during Organize it also
+        /// makes every chest near that station an anchor for an empty bucket. Nothing reported this.
+        /// Warn once per rebuild instead.</summary>
+        private static void Validate()
+        {
+            foreach (var kv in Parsed)
+            {
+                foreach (var g in kv.Value)
+                {
+                    if (Groups.IsGroup(g)) continue;
+                    Plugin.Log.LogWarning("[stations] '" + kv.Key + "' maps to '" + g +
+                        "', which is not a group in [ItemGroups] - that mapping does nothing. " +
+                        "Valid groups: " + string.Join(", ", Groups.GroupsInOrder()));
+                }
+            }
         }
 
         /// <summary>Group names attracted by a station m_name token, or an empty list.</summary>
@@ -183,22 +214,43 @@ namespace ChestButler.Core
             if (bestMapped != null)
             {
                 var groups = GroupsForStationName(bestMapped);
-                Plugin.Log.LogInfo("[organize] chest near '" + bestMapped + "' (" + bestMappedD.ToString("0.0") + "m) -> " + string.Join(",", groups));
+                // 1.1.2: was LogInfo, i.e. one synchronous log write PER CHEST per plan. At a few
+                // hundred chests that alone cost tens of ms and buried the actually-useful unmapped
+                // hint below. The hint stays at Info, but only the first time we see each token.
+                Plugin.Log.LogDebug("[organize] chest near '" + bestMapped + "' (" + bestMappedD.ToString("0.0") + "m) -> " + string.Join(",", groups));
                 return groups;
             }
-            if (bestUnmapped != null)
+            if (bestUnmapped != null && Hinted.Add(bestUnmapped))
                 Plugin.Log.LogInfo("[organize] chest near station '" + bestUnmapped + "' (" + bestUnmappedD.ToString("0.0") +
                     "m) has NO [Stations] mapping - add '" + bestUnmapped + " = <groups>' to the config to route its materials");
             return Empty;
         }
+
+        /// <summary>Station tokens already reported as unmapped, so the hint is logged once per token
+        /// per session instead of once per chest per Organize.</summary>
+        private static readonly HashSet<string> Hinted = new HashSet<string>();
 
         private static void Consider(string mName, float d,
             ref string bestMapped, ref float bestMappedD, ref string bestUnmapped, ref float bestUnmappedD)
         {
             if (string.IsNullOrEmpty(mName)) return;
             bool mapped = Parsed.TryGetValue(mName, out var groups) && groups.Count > 0;
-            if (mapped) { if (d < bestMappedD) { bestMappedD = d; bestMapped = mName; } }
-            else        { if (d < bestUnmappedD) { bestUnmappedD = d; bestUnmapped = mName; } }
+            // 1.1.2: strict '<' meant two equidistant stations (a chest placed exactly between a forge
+            // and a stonecutter — a normal crafting-hall layout) were resolved by m_allStations' Awake
+            // order, so the chest changed which groups it attracted between sessions. Break the tie on
+            // the token name instead: arbitrary, but identical on every client and every relog.
+            if (mapped)
+            {
+                if (d < bestMappedD || (d == bestMappedD && bestMapped != null &&
+                    string.CompareOrdinal(mName, bestMapped) < 0))
+                { bestMappedD = d; bestMapped = mName; }
+            }
+            else
+            {
+                if (d < bestUnmappedD || (d == bestUnmappedD && bestUnmapped != null &&
+                    string.CompareOrdinal(mName, bestUnmapped) < 0))
+                { bestUnmappedD = d; bestUnmapped = mName; }
+            }
         }
     }
 }

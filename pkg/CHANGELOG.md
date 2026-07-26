@@ -1,5 +1,31 @@
 # Changelog
 
+## 1.1.2
+Maintenance release: correctness and performance fixes found by a full source audit. No new features, no config migration needed. Cross-compatible with 1.1.x, so it deploys as a normal patch.
+
+**Fixes that can affect your items**
+- Organize could run twice at once (pressing it on a second sorter while the first run was still going). The two runs could not see each other's in-flight moves and could both issue a transfer for the same stack. Only one Organize run at a time now.
+- Organize could over-fill a destination chest: it re-checked free space per move but never counted what it had already promised that chest in the same run, and in-flight transfers are not reflected locally. It now tracks its own promises.
+- Organize never checked that a *source* chest still existed. A chest destroyed or unloaded mid-run left a window where a transfer was issued against a dying chest. Both endpoints are validated now.
+- Organize now reports what it could NOT move ("N could not move") instead of silently dropping those moves and reporting success.
+
+**Performance**
+- A sorter chest holding items with no home did a full base-wide scan for every one of them, every tick, forever — the most expensive path in the mod on a large base. Unroutable item types are now remembered for 10 s before being retried.
+- The sorter tick no longer runs at all on a dedicated server, where it could never do anything (routing needs a local player for the access and ward checks) but still paid for the scan.
+- Filter/sign lookups were cached for only 3 seconds and re-resolved by scanning every sign and every chest. The cache is now invalidated on the events that actually change it (editing a sign, changing pins, unloading a chest) and lives longer.
+- Item-name matching is ordinal instead of culture-sensitive, wildcard tokens are parsed once instead of per comparison, and normalized names are memoized.
+- Organize's per-frame move budget is now also capped in real time, so a high-refresh-rate client no longer sends proportionally more traffic to the server than a 60 fps one.
+- Station tracking no longer rescans everything on each registration, and the per-chest station log moved to Debug (it was one synchronous log write per chest per Organize); the "unmapped station" hint is now logged once per station type instead of once per chest.
+- The chest spec cache is dropped when a chest unloads, instead of accumulating an entry per chest per zone reload for the whole session.
+
+**Consistency**
+- Chests at exactly the same distance are now ranked by a stable id, so a symmetric storage hall routes the same way every session. Same for a chest sitting equidistant between two crafting stations.
+- Group precedence is now explicit and documented in code. Some items match two groups in the default config (FlametalOre matches both `ores` and `metals`), which was previously resolved by dictionary order.
+- A `[Stations]` mapping that points at a group name which does not exist in `[ItemGroups]` (a typo, or a renamed group) now logs a warning instead of silently attracting nothing.
+- `TransferInterval`'s minimum is now 1 s (was 0.2 s). The default was already 1 s; only settings that were never safe on a large base are removed.
+
+**Known, not fixed here** — see `docs/known-issues-1.1.x.md`: a chest opened by *another player* is invisible to us (`m_inUse` is a local field), so Organize can still take ownership from someone browsing a chest; and the sorter radius default of 128 m may exceed the distance at which chests are actually loaded. Both need changes that are out of scope for a patch.
+
 ## 1.1.1
 - Dependency pin updated to Jotunn 2.29.2 to match the server (no gameplay changes)
 - Default sorter/Organize radius raised to 128 m (max raised to 128). Existing config files keep their saved `Radius`; on a server the admin value is authoritative and syncs to clients, so set the server's `Radius` to 128 to apply it for everyone

@@ -228,6 +228,34 @@ internal static class Program
             Check(TotalTo(moves, 2) == 130, "both other chests drain into the p5 chest (30+100)");
         }
 
+        // 11) Names: 1.1.2 rewrote Normalize/Matches (ordinal compares + cached token parsing).
+        // These lock in the exact matching semantics the item groups depend on.
+        Console.WriteLine("[11] name normalization and wildcard matching");
+        {
+            Check(Names.Normalize("$item_trophy_boar") == "trophyboar", "$item_ prefix and underscores stripped");
+            Check(Names.Normalize("$piece_chest") == "piecechest", "bare $ prefix stripped");
+            Check(Names.Normalize("") == "", "empty name is empty");
+            Check(Names.Normalize("$item_TrophyBoar") == "trophyboar", "lowercased");
+            // memoized on the second call - must return the same answer, not a stale/mutated one
+            Check(Names.Normalize("$item_trophy_boar") == "trophyboar", "repeat call hits the cache with the same result");
+
+            Check(Names.Matches("wood", "wood"), "exact token matches");
+            Check(!Names.Matches("wood", "finewood"), "exact token does not match a superstring");
+            Check(Names.Matches("trophy*", "trophyboar"), "trailing wildcard is a prefix match");
+            Check(!Names.Matches("trophy*", "boartrophy"), "trailing wildcard is not a suffix match");
+            Check(Names.Matches("*meat", "boarmeat"), "leading wildcard is a suffix match");
+            Check(Names.Matches("*mushroom*", "redmushroomstew"), "double wildcard is a contains match");
+            Check(!Names.Matches("*", "anything"), "a bare '*' matches nothing (empty core)");
+            Check(!Names.Matches("", "wood"), "empty token matches nothing");
+            Check(!Names.Matches("wood", ""), "empty name matches nothing");
+
+            // The overlap that actually exists in the shipped [ItemGroups] defaults: FlametalOre is
+            // covered by both ores ("*ore") and metals ("flametal*"). Groups.GroupOrder is what
+            // resolves it; this asserts the ambiguity is real so the ordering is never dropped.
+            Check(Names.Matches("*ore", "flametalore"), "FlametalOre matches the ores token");
+            Check(Names.Matches("flametal*", "flametalore"), "FlametalOre also matches the metals token");
+        }
+
         Console.WriteLine("==========================");
         Console.WriteLine($"RESULT: {_passed} passed, {_failed} failed");
         return _failed == 0 ? 0 : 1;

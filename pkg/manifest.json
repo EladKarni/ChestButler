@@ -1,6 +1,6 @@
 {
   "name": "ChestButler",
-  "version_number": "1.1.1",
+  "version_number": "1.1.2",
   "website_url": "",
   "description": "Dump-and-sort chests: flag a chest as a Sorter and loot flies to the right chests. One-press Organize tidies the whole base, station-aware: metals by the forge, ore+coal by the smelter. Pin filters, Pull restock. Multiplayer-safe via MultiUserChest.",
   "dependencies": [

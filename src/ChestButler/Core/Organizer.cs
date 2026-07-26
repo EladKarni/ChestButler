@@ -139,6 +139,15 @@ namespace ChestButler.Core
         /// MultiUserChest routes each REMOVE to the source chest's owner; the destination add is
         /// applied to our local inventory copy, so we claim destination ownership per move (below)
         /// to make the vanilla owner-gated Container.Save persist it.</summary>
+        /// <summary>True while a plan is executing. A run spans many frames, and a second plan built
+        /// during it cannot see the first one's in-flight moves: the MUC remove path passes
+        /// to = (-1,-1), which creates no InventoryBlock, and the destination add only lands on the
+        /// RPC response. Two overlapping runs therefore both see the same stack as present and both
+        /// issue a remove for it. One run at a time. (1.1.2)</summary>
+        private static bool _running;
+
+        internal static bool IsRunning => _running;
+
         internal static void Execute(OrganizePlan plan)
         {
             if (plan == null || plan.IsEmpty) return;
@@ -147,68 +156,119 @@ namespace ChestButler.Core
                 Plugin.Log.LogWarning("[organize] no Plugin.Instance; cannot start execution");
                 return;
             }
+            if (_running)
+            {
+                Plugin.Log.LogInfo("[organize] a run is already in progress; ignoring this one");
+                if (Player.m_localPlayer != null)
+                    Player.m_localPlayer.Message(MessageHud.MessageType.Center, "Organize already running");
+                return;
+            }
             Plugin.Log.LogInfo("[organize] executing " + plan.Moves.Count + " move(s)");
+            _running = true;
             Plugin.Instance.StartCoroutine(Run(plan));
         }
 
         private static IEnumerator Run(OrganizePlan plan)
         {
-            int perTick = Mathf.Max(1, Plugin.OrganizeMovesPerTick.Value);
-            int budget = perTick;
-            int movedItems = 0;
-            var targetsHit = new HashSet<Container>();
-
-            foreach (var mv in plan.Moves)
+            try
             {
-                var src = mv.Source;
-                var tgt = mv.Target;
-                var item = mv.Item;
-                if (src == null || tgt == null || item == null || item.m_shared == null) continue;
+                int perTick = Mathf.Max(1, Plugin.OrganizeMovesPerTick.Value);
+                int budget = perTick;
+                int movedItems = 0;
+                int skippedMoves = 0, skippedItems = 0;
+                var targetsHit = new HashSet<Container>();
 
-                var sInv = src.GetInventory();
-                var tInv = tgt.GetInventory();
-                if (sInv == null || tInv == null) continue;
-                if (!sInv.GetAllItems().Contains(item)) continue;              // stack gone since preview (stale plan)
+                // 1.1.2: MovesPerTick is a per-FRAME budget, so the actual RPC rate scaled with the
+                // client's framerate (4/frame is 240/s at 60 fps but 576/s at 144 fps, from one
+                // client, at a dedicated server). Hold the nominal 60 fps rate as a ceiling so a
+                // high-refresh client cannot flood the server. The config key keeps its meaning;
+                // switching it to an explicit per-second unit is a 2.0 change.
+                const float NominalFps = 60f;
+                float minBatchInterval = 1f / NominalFps;
+                float lastBatch = Time.realtimeSinceStartup;
 
-                var sBlock = InventoryBlock.Get(sInv);
-                if (sBlock != null && sBlock.IsSlotBlocked(item.m_gridPos)) continue; // in flight
+                // 1.1.2: Router.Room reads a LOCAL inventory that does not reflect in-flight adds
+                // (MUC applies them on the RPC response), so N moves into the same chest all saw the
+                // same free space and all issued — over-committing the target. Debit what we have
+                // already promised each destination for the duration of the run.
+                var promised = new Dictionary<Container, int>();
 
-                int room = Router.Room(tInv, item);                           // re-check: target may have filled
-                if (room <= 0) continue;
-                int amount = Math.Min(mv.Amount, Math.Min(item.m_stack, room));
-                if (amount <= 0) continue;
-
-                var tgtNv = SorterZdo.NView(tgt);
-                if (tgtNv == null || !tgtNv.IsValid()) continue;
-                if (tgt.IsInUse()) continue;               // another player is browsing it; don't yank ownership
-
-                // MUC routes the REMOVE to the source owner, but applies the destination add to OUR
-                // local inventory (InventoryHandler.RPC_RequestItemRemoveResponse → MoveItemToThis).
-                // Vanilla Container.Save() is owner-gated, so without owning the destination ZDO the
-                // added items would never persist (silent loss in multiplayer). Same defensive claim
-                // as Filters.SetPinned / SorterZdo.SetSorter.
-                if (!tgtNv.IsOwner()) tgtNv.ClaimOwnership();
-
-                // exactly Puller's transfer primitive - the ONLY sanctioned write path
-                ContainerHandler.RemoveItemFromChest(
-                    src, item, tInv, new Vector2i(-1, -1),
-                    tgtNv.GetZDO().m_uid, amount, null);
-
-                movedItems += amount;
-                targetsHit.Add(tgt);
-
-                if (--budget <= 0)
+                foreach (var mv in plan.Moves)
                 {
-                    budget = perTick;
-                    yield return null;   // spread across frames so a big base does not hitch
-                }
-            }
+                    var src = mv.Source;
+                    var tgt = mv.Target;
+                    var item = mv.Item;
+                    if (src == null || tgt == null || item == null || item.m_shared == null) { skippedMoves++; continue; }
 
-            if (Player.m_localPlayer != null)
-                Player.m_localPlayer.Message(MessageHud.MessageType.Center,
-                    "Organized " + movedItems + " item" + (movedItems == 1 ? "" : "s") +
-                    " into " + targetsHit.Count + " chest" + (targetsHit.Count == 1 ? "" : "s"));
-            Plugin.Log.LogInfo("[organize] moved " + movedItems + " items into " + targetsHit.Count + " chests");
+                    var sInv = src.GetInventory();
+                    var tInv = tgt.GetInventory();
+                    if (sInv == null || tInv == null) { skippedMoves++; continue; }
+                    if (!sInv.GetAllItems().Contains(item)) { skippedMoves++; skippedItems += mv.Amount; continue; }  // stack gone since preview (stale plan)
+
+                    // 1.1.2: the source was never validated. A chest destroyed or unloaded mid-run
+                    // spills its contents as ground drops on its owner's client, and issuing a remove
+                    // against that dying ZDO is exactly the window where an item can exist twice.
+                    var srcNv = SorterZdo.NView(src);
+                    if (srcNv == null || !srcNv.IsValid()) { skippedMoves++; skippedItems += mv.Amount; continue; }
+
+                    var sBlock = InventoryBlock.Get(sInv);
+                    if (sBlock != null && sBlock.IsSlotBlocked(item.m_gridPos)) { skippedMoves++; continue; } // in flight
+
+                    int room = Router.Room(tInv, item);                           // re-check: target may have filled
+                    if (promised.TryGetValue(tgt, out var already)) room -= already;
+                    if (room <= 0) { skippedMoves++; skippedItems += mv.Amount; continue; }
+                    int amount = Math.Min(mv.Amount, Math.Min(item.m_stack, room));
+                    if (amount <= 0) { skippedMoves++; continue; }
+
+                    var tgtNv = SorterZdo.NView(tgt);
+                    if (tgtNv == null || !tgtNv.IsValid()) { skippedMoves++; skippedItems += mv.Amount; continue; }
+                    // Another player is browsing it; don't yank ownership. NOTE: Container.m_inUse is a
+                    // LOCAL field, so this only sees chests open on THIS client — a remote player's open
+                    // chest is invisible to us and the claim below can still strand their edits. A
+                    // synced in-use flag is a 2.0 item (every peer runs the mod, so we can add one).
+                    if (tgt.IsInUse()) { skippedMoves++; skippedItems += mv.Amount; continue; }
+
+                    // MUC routes the REMOVE to the source owner, but applies the destination add to OUR
+                    // local inventory (InventoryHandler.RPC_RequestItemRemoveResponse → MoveItemToThis).
+                    // Vanilla Container.Save() is owner-gated, so without owning the destination ZDO the
+                    // added items would never persist (silent loss in multiplayer). Same defensive claim
+                    // as Filters.SetPinned / SorterZdo.SetSorter.
+                    if (!tgtNv.IsOwner()) tgtNv.ClaimOwnership();
+
+                    // exactly Puller's transfer primitive - the ONLY sanctioned write path
+                    ContainerHandler.RemoveItemFromChest(
+                        src, item, tInv, new Vector2i(-1, -1),
+                        tgtNv.GetZDO().m_uid, amount, null);
+
+                    promised[tgt] = already + amount;
+                    movedItems += amount;
+                    targetsHit.Add(tgt);
+
+                    if (--budget <= 0)
+                    {
+                        budget = perTick;
+                        // Spread across frames so a big base does not hitch, and hold the batch rate
+                        // at NominalFps regardless of the client's actual framerate.
+                        do { yield return null; }
+                        while (Time.realtimeSinceStartup - lastBatch < minBatchInterval);
+                        lastBatch = Time.realtimeSinceStartup;
+                    }
+                }
+
+                string msg = "Organized " + movedItems + " item" + (movedItems == 1 ? "" : "s") +
+                             " into " + targetsHit.Count + " chest" + (targetsHit.Count == 1 ? "" : "s");
+                if (skippedItems > 0)
+                    msg += " (" + skippedItems + " could not move)";
+
+                if (Player.m_localPlayer != null)
+                    Player.m_localPlayer.Message(MessageHud.MessageType.Center, msg);
+                Plugin.Log.LogInfo("[organize] moved " + movedItems + " items into " + targetsHit.Count +
+                    " chests; skipped " + skippedMoves + " move(s) covering " + skippedItems + " item(s)");
+            }
+            finally
+            {
+                _running = false;
+            }
         }
     }
 }
