@@ -8,8 +8,18 @@ namespace ChestButler.Core
     /// Runs only on the ZDO owner; all moves go through MultiUserChest.</summary>
     internal class SorterBehaviour : MonoBehaviour
     {
+        // How long a "no home for this item" answer is trusted before we scan for it again.
+        // Homeless items are the steady state of a sorter chest, and each scan is a full
+        // Router.FindTarget -> ContainerTracker.Candidates sweep over the whole base. Before 1.1.2
+        // a miss cost a sweep and consumed no budget, so a sorter holding 32 unroutable items paid
+        // ~32 base-wide scans EVERY tick, forever — the single most expensive path in the mod.
+        private const float MissCooldown = 10f;
+
         private Container _container;
         private float _nextTick;
+
+        // normalized item name -> Time.time when the miss was recorded (per sorter chest)
+        private readonly Dictionary<string, float> _misses = new Dictionary<string, float>();
 
         private void Awake()
         {
@@ -21,6 +31,11 @@ namespace ChestButler.Core
         {
             if (Time.time < _nextTick) return;
             _nextTick = Time.time + Plugin.TransferInterval.Value;
+
+            // Routing is evaluated from the LOCAL player's point of view: both the per-container
+            // access check and the ward check need Player.m_localPlayer. On a dedicated server that
+            // is always null, so every candidate is rejected and the sweep can only do wasted work.
+            if (Player.m_localPlayer == null) return;
 
             if (_container == null) return;
             var nview = SorterZdo.NView(_container);
@@ -34,6 +49,7 @@ namespace ChestButler.Core
 
             var block = InventoryBlock.Get(inv);
             int budget = Plugin.StacksPerTick.Value;
+            float now = Time.time;
 
             var snapshot = new List<ItemDrop.ItemData>(inv.GetAllItems());
             foreach (var item in snapshot)
@@ -42,8 +58,21 @@ namespace ChestButler.Core
                 if (item == null || item.m_shared == null) continue;
                 if (block != null && block.IsSlotBlocked(item.m_gridPos)) continue; // in flight
 
+                // Skip item types we recently failed to place. Worst case, a newly built or newly
+                // labelled chest starts receiving them up to MissCooldown seconds late.
+                var norm = Names.Normalize(item.m_shared.m_name);
+                if (norm.Length > 0 && _misses.TryGetValue(norm, out var missedAt))
+                {
+                    if (now - missedAt < MissCooldown) continue;
+                    _misses.Remove(norm);
+                }
+
                 var target = Router.FindTarget(_container, item, Plugin.SorterRadius.Value, out int amount);
-                if (target == null || amount <= 0) continue; // no home → stays in sorter
+                if (target == null || amount <= 0)
+                {
+                    if (norm.Length > 0) _misses[norm] = now; // no home → stays in sorter
+                    continue;
+                }
 
                 ContainerHandler.AddItemToChest(
                     target, item, inv, new Vector2i(-1, -1),

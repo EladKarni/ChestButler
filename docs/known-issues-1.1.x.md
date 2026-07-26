@@ -10,6 +10,29 @@ Doing this first also de-risks 2.0: items 1, 2, 6, 7, 9 and 10 are load-bearing 
 
 Ordered by severity. Line references are to the 1.1.1 tree.
 
+## Status after the 1.1.2 patch (branch `fix/1.1.2`)
+
+| # | Item | Status |
+|---|---|---|
+| 1 | `sort: off` chests enrolled as sources | **NOT CHANGED — needs an owner decision.** The behaviour is deliberate and asserted by planner test [7] ("excluded chests are never targets, still sources"). `Ignore` and `ManualOnly` are treated identically today. The question is whether `sort: off` should mean "never receives" (current) or "leave this chest alone entirely" — a semantic change, not a bug fix, and it belongs in 2.0 with the v2 allocator that makes it matter. |
+| 2 | No in-flight guard on `Organizer.Execute` | **FIXED** — single static guard, released in a `finally`; a second press reports "Organize already running". |
+| 3 | `IsInUse()` is local-only | **PARTIALLY — documented, not fixed.** There is no networked in-use signal to check. Since `NetworkCompatibility` is `EveryoneMustHaveMod`, 2.0 can add its own synced in-use flag on chest open/close; a patch cannot. The hazard is now spelled out at the call site. |
+| 4 | Destination over-commit | **FIXED** — per-run `promised[target]` ledger debited at issue time. |
+| 5 | Silent dropped moves / dishonest report | **FIXED** — `skippedMoves`/`skippedItems` counters; the HUD message gains "(N could not move)". |
+| 6 | Unstable distance tie-breaks | **FIXED** — `ContainerTracker.Candidates` sorts by `(distance, ZDO uid)`; `Stations.Consider` breaks equidistant ties on the station token. |
+| 7 | `FlametalOre` in two groups | **FIXED** — explicit `Groups.GroupOrder` + `GroupsInOrder()`/`FirstGroupFor()`, with a startup check that the order and the group table cannot drift apart. |
+| 8 | User-added `[ItemGroups]` ignored | **PARTIALLY** — a `[Stations]` mapping naming a nonexistent group now warns at startup with the valid list. Binding genuinely user-added group keys needs BepInEx orphaned-entry handling; deferred to 2.0. |
+| 9 | Sorter tick scans the base per homeless item | **FIXED** — 10 s per-item-type miss cooldown, so the steady state costs ~1 scan per type per 10 s instead of one per tick. |
+| 10 | O(chests²) sign resolution on the tick path | **FIXED** — cache TTL 3 s → 30 s, with explicit invalidation on sign edit (`Sign.SetText`), pin/manual change, and chest unload. |
+| 11 | `IsSlotBlocked` guards may be dead code | **NOT CHANGED — needs the in-game check** (roadmap §9 item 3). Left in place; removing a guard on an unverified assumption is the wrong risk. |
+| 12 | Unbounded static growth | **FIXED** — spec cache pruned on `Container.OnDestroyed`; processor prune amortized to every 64 registrations instead of every one. |
+| 13 | Culture-sensitive matching + allocations | **FIXED** — ordinal everywhere, tokens parsed once, `Normalize` memoized. Covered by 16 new offline tests. |
+| 14 | `OrganizeMovesPerTick` wrong unit | **PARTIALLY** — the per-frame budget is now also capped in real time at the nominal 60 fps rate, so a 144 fps client no longer sends 2.4× the traffic. Renaming the key to an explicit per-second unit is a 2.0 change. |
+| 15 | `TransferInterval` 0.2 s floor | **FIXED** — floor raised to 1.0 s (the default was already 1.0). |
+| 16 | Everything is `IsAdminOnly` | **NOT CHANGED — owner decision.** Un-admin-locking the perf knobs lets a non-admin fix their own framerate, but also lets any client change how fast items move for everyone. Worth deciding deliberately rather than in a patch. |
+| 17 | `SorterRadius` 128 m vs loaded area | **NOT CHANGED — blocked on measurement** (roadmap §9 items 1–2). `ZoneSystem.c_ZoneSize = 64` is confirmed as a compile-time constant in `assembly_valheim.dll`; `m_activeArea`/`m_activeDistantArea` are Unity-serialized and still need a runtime log. |
+| 18 | `StationRange` doc-string misleading | **NOT CHANGED** — cosmetic; folded into the 2.0 config pass. |
+
 ## Correctness — item loss, wrong results
 
 1. **`sort: off` / `sort: manual` chests are still enrolled as Organize *sources*.**

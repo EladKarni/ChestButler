@@ -17,7 +17,7 @@ namespace ChestButler
     {
         public const string ModGuid = "eksolutions.chestbutler";
         public const string ModName = "ChestButler";
-        public const string ModVersion = "1.1.1";
+        public const string ModVersion = "1.1.2";
 
         internal static Plugin Instance;          // for StartCoroutine (Organize execution)
         internal static ManualLogSource Log;
@@ -40,9 +40,12 @@ namespace ChestButler
                     new AcceptableValueRange<float>(5f, 128f),
                     new ConfigurationManagerAttributes { IsAdminOnly = true }));
 
+            // 1.1.2: the floor was 0.2 s. Each tick can cost a full base scan per item type in the
+            // sorter, so 20 sorters at 5 ticks/s was enough to eat a core on a large base. The
+            // default was already 1.0; this only removes the settings that were never safe.
             TransferInterval = Config.Bind("Sorting", "TransferInterval", 1.0f,
                 new ConfigDescription("Seconds between transfer ticks per sorter.",
-                    new AcceptableValueRange<float>(0.2f, 10f),
+                    new AcceptableValueRange<float>(1f, 10f),
                     new ConfigurationManagerAttributes { IsAdminOnly = true }));
 
             StacksPerTick = Config.Bind("Sorting", "StacksPerTick", 2,

@@ -16,6 +16,9 @@
   <ItemGroup>
     <Compile Include="Program.cs" />
     <Compile Include="../../src/ChestButler/Core/OrganizePlanner.cs" Link="OrganizePlanner.cs" />
+    <!-- Names is the other genuinely Unity-free file: pure string matching, and 1.1.2 rewrote it
+         (ordinal comparisons + cached token parsing), so it needs a regression net. -->
+    <Compile Include="../../src/ChestButler/Core/Names.cs" Link="Names.cs" />
   </ItemGroup>
 
 </Project>

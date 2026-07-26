@@ -35,7 +35,13 @@ namespace ChestButler.Core
     internal static class Filters
     {
         private const float SignRange = 2.5f;
-        private const float CacheTtl = 3f;
+
+        // 1.1.2: was 3 s, i.e. shorter than nothing that actually invalidates it and close enough to
+        // the sorter tick that the cache missed constantly. Every miss re-sweeps every registered
+        // Sign and runs ContainerTracker.NearestTo (a full container scan) per in-range sign, which
+        // is O(chests^2) on the tick path. The cache is now invalidated explicitly instead: on pin
+        // or manual-flag change (SetPinned/SetManual), on sign text change and on chest unload.
+        private const float CacheTtl = 30f;
         private static readonly int ItemsHash = "psort_items".GetStableHashCode();
         private static readonly int ManualHash = "psort_manual".GetStableHashCode();
 
@@ -43,7 +49,14 @@ namespace ChestButler.Core
         private static readonly Dictionary<Container, KeyValuePair<float, FilterSpec>> Cache =
             new Dictionary<Container, KeyValuePair<float, FilterSpec>>();
 
-        internal static void RegisterSign(Sign s) { if (s != null) Signs.Add(s); }
+        internal static void RegisterSign(Sign s) { if (s != null) { Signs.Add(s); InvalidateAll(); } }
+
+        /// <summary>Drop one chest's cached spec (chest unloaded, or its own filters changed).</summary>
+        internal static void Invalidate(Container c) { if (c != null) Cache.Remove(c); }
+
+        /// <summary>Drop every cached spec — a sign appeared, changed text or was destroyed, and any
+        /// chest within SignRange of it may now resolve differently.</summary>
+        internal static void InvalidateAll() { Cache.Clear(); }
 
         // ---------- pinned items (ZDO) ----------
 
