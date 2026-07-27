@@ -116,8 +116,9 @@ namespace ChestButler.Patches
             _organizeBtn = MakeButton(takeAll, "psort_organize", OnOrganizeClick, out _organizeLabel);
         }
 
-        // Re-anchor the bar just below the container's item grid on every chest open, so it never
-        // overlaps slots on taller chests. EnsureBar builds the bar once; this places it each time.
+        // Park the bar in the panel's bottom-left corner, mirroring Take All's margin from the top,
+        // and only move it when the chest's rows actually reach down into that corner. EnsureBar
+        // builds the bar once; this places it on open and whenever the grid is rebuilt.
         private static void PositionBar(InventoryGui gui)
         {
             if (_bar == null) return;
@@ -130,22 +131,32 @@ namespace ChestButler.Patches
             Rect pr = parent.rect;
             float taW = srcRt.rect.width, taH = srcRt.rect.height;
             float refX = pr.x + pr.width * srcRt.anchorMin.x;
+            float refY = pr.y + pr.height * srcRt.anchorMin.y;
             float centerX = refX + srcRt.anchoredPosition.x + (0.5f - srcRt.pivot.x) * taW;
+            float centerY = refY + srcRt.anchoredPosition.y + (0.5f - srcRt.pivot.y) * taH;
             float leftMargin = (centerX - taW * 0.5f) - pr.xMin;      // keep Take All's left edge
-
-            // Bottom of the rows actually IN USE, in the panel's local space.
-            float usedBottomLocalY;
-            if (!TryGetUsedGridBottom(gui, parent, out usedBottomLocalY))
-                usedBottomLocalY = pr.yMin + taH;                     // fall back to just inside the panel floor
+            float topMargin = pr.yMax - (centerY + taH * 0.5f);       // Take All's gap from the panel top
 
             const float gap = 6f;
-            float barY = (usedBottomLocalY - gap) - pr.yMin;
 
-            // A small chest leaves empty panel below its rows, so the bar sits INSIDE the panel. A
-            // chest whose rows fill the panel pushes it past the floor, which is intended — but never
-            // let it ride up over the slots.
-            float floor = -taH;                                       // one button-height below the panel
-            if (barY < floor) barY = floor;
+            // PREFERRED: bottom-left corner, symmetric with the top row. anchoredPosition.y is the
+            // bar's TOP edge above the panel floor (anchor = panel bottom-left, pivot = bar top-left).
+            float barY = topMargin + taH;
+
+            // Only give that up if the rows in use would collide with it.
+            float usedBottomLocalY;
+            if (TryGetUsedGridBottom(gui, parent, out usedBottomLocalY))
+            {
+                float barTopLocalY = pr.yMin + barY;
+                if (barTopLocalY > usedBottomLocalY - gap)
+                {
+                    // The grid reaches into the corner: sit directly under the last row instead,
+                    // which for a full-height grid means just below the panel.
+                    barY = (usedBottomLocalY - gap) - pr.yMin;
+                    float floor = -taH;                               // never further than one row below
+                    if (barY < floor) barY = floor;
+                }
+            }
 
             if (float.IsNaN(_lastBarY) || Mathf.Abs(barY - _lastBarY) > 0.5f)
             {
