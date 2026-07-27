@@ -21,6 +21,16 @@ namespace ChestButler.Patches
         private static readonly AccessTools.FieldRef<InventoryGui, InventoryGrid> ContainerGridRef =
             AccessTools.FieldRefAccess<InventoryGui, InventoryGrid>("m_containerGrid");
 
+        // The grid's own RectTransform spans the WHOLE panel regardless of how many rows the chest
+        // actually has, so measuring its bottom corner always parked the bar at the panel floor.
+        // Measure the live slot objects instead — that is the bottom of the rows in use. They are the
+        // children of m_gridRoot (InventoryGrid.Element itself is private, so we go via the root).
+        private static readonly AccessTools.FieldRef<InventoryGrid, RectTransform> GridRootRef =
+            AccessTools.FieldRefAccess<InventoryGrid, RectTransform>("m_gridRoot");
+
+        private static float _lastBarY = float.NaN;
+        private static readonly Vector3[] Corners = new Vector3[4];
+
         // Organize preview-then-confirm: first press builds+previews a plan, a second press on the
         // same chest within the window executes it. Any close / different chest / timeout cancels.
         private const float ConfirmWindow = 5f;
@@ -34,9 +44,21 @@ namespace ChestButler.Patches
         {
             if (container != _pendingChest) ClearPending();   // opening a different chest cancels a pending Organize
             _current = container;
+            _lastBarY = float.NaN;                            // force a reposition for the new chest
             EnsureBar(__instance);
             PositionBar(__instance);
             Refresh();
+        }
+
+        /// <summary>Reposition after the container grid has been rebuilt. At Show-time the slot
+        /// elements still belong to the previous chest (or do not exist yet), so measuring there
+        /// alone gets the wrong row count on the first frame. UpdateContainer runs every frame the
+        /// panel is open, and PositionBar only writes when the target actually moved.</summary>
+        [HarmonyPostfix, HarmonyPatch("UpdateContainer")]
+        private static void UpdateContainerPostfix(InventoryGui __instance)
+        {
+            if (_current == null || _bar == null || !_bar.gameObject.activeSelf) return;
+            PositionBar(__instance);
         }
 
         [HarmonyPostfix, HarmonyPatch("Hide")]
@@ -111,21 +133,57 @@ namespace ChestButler.Patches
             float centerX = refX + srcRt.anchoredPosition.x + (0.5f - srcRt.pivot.x) * taW;
             float leftMargin = (centerX - taW * 0.5f) - pr.xMin;      // keep Take All's left edge
 
-            // grid bottom in the panel's local space; fall back to just inside the panel bottom
-            float gridBottomLocalY = pr.yMin + taH;
-            var grid = ContainerGridRef(gui);
-            var gridRt = grid != null ? grid.transform as RectTransform : null;
-            if (gridRt != null)
-            {
-                var wc = new Vector3[4];
-                gridRt.GetWorldCorners(wc);                          // 0=BL,1=TL,2=TR,3=BR
-                gridBottomLocalY = parent.InverseTransformPoint(wc[0]).y;
-            }
-            const float gap = 6f;
-            _bar.anchoredPosition = new Vector2(leftMargin, (gridBottomLocalY - gap) - pr.yMin);
+            // Bottom of the rows actually IN USE, in the panel's local space.
+            float usedBottomLocalY;
+            if (!TryGetUsedGridBottom(gui, parent, out usedBottomLocalY))
+                usedBottomLocalY = pr.yMin + taH;                     // fall back to just inside the panel floor
 
-            Plugin.Log.LogInfo("[ui] panel=" + pr + " gridBottomLocalY=" + gridBottomLocalY
-                + " barY=" + ((gridBottomLocalY - gap) - pr.yMin) + " leftMargin=" + leftMargin);
+            const float gap = 6f;
+            float barY = (usedBottomLocalY - gap) - pr.yMin;
+
+            // A small chest leaves empty panel below its rows, so the bar sits INSIDE the panel. A
+            // chest whose rows fill the panel pushes it past the floor, which is intended — but never
+            // let it ride up over the slots.
+            float floor = -taH;                                       // one button-height below the panel
+            if (barY < floor) barY = floor;
+
+            if (float.IsNaN(_lastBarY) || Mathf.Abs(barY - _lastBarY) > 0.5f)
+            {
+                _bar.anchoredPosition = new Vector2(leftMargin, barY);
+                _lastBarY = barY;
+                Plugin.Log.LogDebug("[ui] panel=" + pr + " usedGridBottom=" + usedBottomLocalY
+                    + " barY=" + barY + " leftMargin=" + leftMargin);
+            }
+        }
+
+        /// <summary>Lowest edge of the container grid's ACTIVE slot objects, in <paramref name="space"/>'s
+        /// local coordinates. The grid's own RectTransform is sized to the whole panel whatever the
+        /// chest holds, so it cannot be used to find where the rows end — the slots can.</summary>
+        private static bool TryGetUsedGridBottom(InventoryGui gui, RectTransform space, out float bottomLocalY)
+        {
+            bottomLocalY = 0f;
+            var grid = ContainerGridRef(gui);
+            if (grid == null) return false;
+
+            var root = GridRootRef(grid);
+            if (root == null || root.childCount == 0) return false;
+
+            float lowest = float.MaxValue;
+            bool any = false;
+            for (int i = 0; i < root.childCount; i++)
+            {
+                var child = root.GetChild(i);
+                if (child == null || !child.gameObject.activeSelf) continue;   // pooled/unused slot
+                var rt = child as RectTransform;
+                if (rt == null) continue;
+                rt.GetWorldCorners(Corners);                                  // 0=BL,1=TL,2=TR,3=BR
+                float y = space.InverseTransformPoint(Corners[0]).y;
+                if (y < lowest) { lowest = y; any = true; }
+            }
+
+            if (!any) return false;
+            bottomLocalY = lowest;
+            return true;
         }
 
         private static Button MakeButton(Button template, string name,
