@@ -28,23 +28,25 @@ dotnet build src/ChestButler/ChestButler.csproj -c Release --no-incremental "$@"
 # keep only our artifacts in dist (framework refs get copy-localed due to FrameworkPathOverride)
 find dist -type f ! -name "ChestButler.dll" ! -name "ChestButler.pdb" -delete
 
-# auto-install into the game profile if one is present. Checks the CI/sandbox mount first, then the
-# Windows Thunderstore Mod Manager / r2modman default-profile locations on the host.
-PLUGINS=""
+# auto-install into the dedicated TEST profile only (leaves Default / Karnimor Server untouched).
+TEST_PROFILE="Test"
+PROFILES_ROOT=""
 for d in \
-  "/sessions/trusting-eloquent-euler/mnt/profiles/Default/BepInEx/plugins" \
-  "$HOME/AppData/Roaming/Thunderstore Mod Manager/DataFolder/Valheim/profiles/Default/BepInEx/plugins" \
-  "$HOME/AppData/Roaming/r2modmanPlus-local/Valheim/profiles/Default/BepInEx/plugins" ; do
-  if [ -d "$d" ]; then PLUGINS="$d"; break; fi
+  "/sessions/trusting-eloquent-euler/mnt/profiles" \
+  "$HOME/AppData/Roaming/Thunderstore Mod Manager/DataFolder/Valheim/profiles" \
+  "$HOME/AppData/Roaming/r2modmanPlus-local/Valheim/profiles" ; do
+  if [ -d "$d" ]; then PROFILES_ROOT="$d"; break; fi
 done
-if [ -n "$PLUGINS" ]; then
-  MGR="$PLUGINS/EK_Solutions-ChestButler"
+if [ -n "$PROFILES_ROOT" ]; then
+  MGR="$PROFILES_ROOT/$TEST_PROFILE/BepInEx/plugins/EK_Solutions-ChestButler"
   if [ -d "$MGR" ]; then
-    # single copy inside the manager's package folder (avoids a duplicate-GUID loose DLL)
-    cp dist/ChestButler.dll "$MGR/" && echo "-> installed into manager folder ($MGR)"
+    if cp dist/ChestButler.dll "$MGR/" 2>/dev/null; then
+      echo "-> installed into '$TEST_PROFILE' profile"
+    else
+      echo "-> SKIPPED (locked - game running?) '$TEST_PROFILE'"
+    fi
   else
-    rm -f "$PLUGINS/ProjectSorter.dll" "$PLUGINS/ProjectSorter.pdb"
-    cp dist/ChestButler.dll "$PLUGINS/" && echo "-> installed to profile plugins (loose)"
+    echo "-> test profile '$TEST_PROFILE' not found under $PROFILES_ROOT"
   fi
 fi
 

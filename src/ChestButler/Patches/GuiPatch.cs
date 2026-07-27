@@ -17,6 +17,10 @@ namespace ChestButler.Patches
         private static TMP_Text _sorterLabel, _pinLabel, _clearLabel, _pullLabel, _organizeLabel;
         private static Container _current;
 
+        // m_containerGrid is private on InventoryGui; reach it the same way SorterZdo reaches m_nview.
+        private static readonly AccessTools.FieldRef<InventoryGui, InventoryGrid> ContainerGridRef =
+            AccessTools.FieldRefAccess<InventoryGui, InventoryGrid>("m_containerGrid");
+
         // Organize preview-then-confirm: first press builds+previews a plan, a second press on the
         // same chest within the window executes it. Any close / different chest / timeout cancels.
         private const float ConfirmWindow = 5f;
@@ -31,6 +35,7 @@ namespace ChestButler.Patches
             if (container != _pendingChest) ClearPending();   // opening a different chest cancels a pending Organize
             _current = container;
             EnsureBar(__instance);
+            PositionBar(__instance);
             Refresh();
         }
 
@@ -64,23 +69,11 @@ namespace ChestButler.Patches
             _bar = (RectTransform)barGo.transform;
             _bar.SetParent(srcRt.parent, false);
 
-            // Find where Take All sits inside the panel (it uses a centre anchor), then
-            // anchor our bar to the panel's bottom-left CORNER and mirror those margins,
-            // so it snaps to the corner and stays symmetric with the top row on any resize.
-            Rect pr = parent.rect;
-            float taW = srcRt.rect.width, taH = srcRt.rect.height;
-            float refX = pr.x + pr.width * srcRt.anchorMin.x;
-            float refY = pr.y + pr.height * srcRt.anchorMin.y;
-            float centerX = refX + srcRt.anchoredPosition.x + (0.5f - srcRt.pivot.x) * taW;
-            float centerY = refY + srcRt.anchoredPosition.y + (0.5f - srcRt.pivot.y) * taH;
-
-            float leftMargin = (centerX - taW * 0.5f) - pr.xMin;   // Take All's gap from the left edge
-            float topMargin  = pr.yMax - (centerY + taH * 0.5f);   // Take All's gap from the top edge
-
-            _bar.anchorMin = new Vector2(0f, 0f);   // pin to the panel's bottom-left corner
+            // Anchor reference = panel bottom-left corner; PositionBar sets the exact Y each time a
+            // chest opens so the bar sits just below the item grid (which grows with chest size).
+            _bar.anchorMin = new Vector2(0f, 0f);
             _bar.anchorMax = new Vector2(0f, 0f);
-            _bar.pivot     = new Vector2(0f, 0f);   // bar's own bottom-left grows right + up
-            _bar.anchoredPosition = new Vector2(leftMargin, topMargin);   // mirror the top row's margins
+            _bar.pivot     = new Vector2(0f, 1f);   // top-left pivot: the bar grows down + right
 
             var layout = barGo.AddComponent<HorizontalLayoutGroup>();
             layout.spacing = 8f;
@@ -99,6 +92,40 @@ namespace ChestButler.Patches
             _clearBtn    = MakeButton(takeAll, "psort_clear",    OnClearClick,    out _clearLabel);
             _pullBtn     = MakeButton(takeAll, "psort_pull",     OnPullClick,     out _pullLabel);
             _organizeBtn = MakeButton(takeAll, "psort_organize", OnOrganizeClick, out _organizeLabel);
+        }
+
+        // Re-anchor the bar just below the container's item grid on every chest open, so it never
+        // overlaps slots on taller chests. EnsureBar builds the bar once; this places it each time.
+        private static void PositionBar(InventoryGui gui)
+        {
+            if (_bar == null) return;
+            var takeAll = gui.m_takeAllButton;
+            if (takeAll == null) return;
+            var srcRt = takeAll.GetComponent<RectTransform>();
+            var parent = srcRt.parent as RectTransform;
+            if (parent == null) return;
+
+            Rect pr = parent.rect;
+            float taW = srcRt.rect.width, taH = srcRt.rect.height;
+            float refX = pr.x + pr.width * srcRt.anchorMin.x;
+            float centerX = refX + srcRt.anchoredPosition.x + (0.5f - srcRt.pivot.x) * taW;
+            float leftMargin = (centerX - taW * 0.5f) - pr.xMin;      // keep Take All's left edge
+
+            // grid bottom in the panel's local space; fall back to just inside the panel bottom
+            float gridBottomLocalY = pr.yMin + taH;
+            var grid = ContainerGridRef(gui);
+            var gridRt = grid != null ? grid.transform as RectTransform : null;
+            if (gridRt != null)
+            {
+                var wc = new Vector3[4];
+                gridRt.GetWorldCorners(wc);                          // 0=BL,1=TL,2=TR,3=BR
+                gridBottomLocalY = parent.InverseTransformPoint(wc[0]).y;
+            }
+            const float gap = 6f;
+            _bar.anchoredPosition = new Vector2(leftMargin, (gridBottomLocalY - gap) - pr.yMin);
+
+            Plugin.Log.LogInfo("[ui] panel=" + pr + " gridBottomLocalY=" + gridBottomLocalY
+                + " barY=" + ((gridBottomLocalY - gap) - pr.yMin) + " leftMargin=" + leftMargin);
         }
 
         private static Button MakeButton(Button template, string name,
