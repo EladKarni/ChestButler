@@ -25,8 +25,12 @@ namespace ChestButler
         internal static ConfigEntry<float> TransferInterval;
         internal static ConfigEntry<int> StacksPerTick;
         internal static ConfigEntry<bool> ContainsFallback;
-        internal static ConfigEntry<int> OrganizeMovesPerTick;
-        internal static ConfigEntry<float> StationRange;
+
+        // WAVE 0: the [Organize] entries now live in OrganizeConfig so that W1 can add to that
+        // section without touching this file, and so no two 2.0 workstreams edit the same region of
+        // Plugin.Awake. These forwarders keep every existing reader compiling unchanged.
+        internal static ConfigEntry<int> OrganizeMovesPerTick => OrganizeConfig.MovesPerTick;
+        internal static ConfigEntry<float> StationRange => OrganizeConfig.StationRange;
 
         private Harmony _harmony;
 
@@ -57,18 +61,14 @@ namespace ChestButler
                 new ConfigDescription("Route items to chests that already contain them when no explicit filter matches.",
                     null, new ConfigurationManagerAttributes { IsAdminOnly = true }));
 
-            OrganizeMovesPerTick = Config.Bind("Organize", "MovesPerTick", 4,
-                new ConfigDescription("How many item moves the Organize sweep performs per frame (higher = faster, more hitch).",
-                    new AcceptableValueRange<int>(1, 16),
-                    new ConfigurationManagerAttributes { IsAdminOnly = true }));
-
-            StationRange = Config.Bind("Organize", "StationRange", 8f,
-                new ConfigDescription("Max distance (m) from a chest to a crafting station for the chest to inherit that station's item groups during Organize. Nearest mapped station wins.",
-                    new AcceptableValueRange<float>(1f, 20f),
-                    new ConfigurationManagerAttributes { IsAdminOnly = true }));
-
             Groups.Init(Config);
             Stations.Init(Config);
+
+            // WAVE 0 (2.0): one line per feature, each owned by exactly one workstream. Fill in your
+            // own module; do not add config binds or registrations directly to this method.
+            OrganizeConfig.Init(Config);       // W1 - Organize v2
+            Gather.Init(Config);               // W2 - Gather
+            SorterChestPiece.Register();       // W3 - Dedicated Sorter Chest
 
             _harmony = new Harmony(ModGuid);
             _harmony.PatchAll();

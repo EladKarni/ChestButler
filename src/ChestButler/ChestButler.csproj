@@ -21,6 +21,14 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- WAVE 0: this project uses the SDK's default **/*.cs globbing, so new source files need no
+         csproj edit — that is one fewer shared file for the 2.0 workstreams. Non-code assets do
+         need an entry, so the glob below is pre-added for W3's Sorter Chest icon: drop files into
+         src/ChestButler/Assets/ and they are embedded. Matches nothing until that folder exists. -->
+    <EmbeddedResource Include="Assets/**" />
+  </ItemGroup>
+
+  <ItemGroup>
     <!-- modding stack (/libs) -->
     <Reference Include="BepInEx"><HintPath>$(MSBuildThisFileDirectory)../../libs/BepInEx.dll</HintPath><Private>false</Private></Reference>
     <Reference Include="0Harmony"><HintPath>$(MSBuildThisFileDirectory)../../libs/0Harmony.dll</HintPath><Private>false</Private></Reference>
