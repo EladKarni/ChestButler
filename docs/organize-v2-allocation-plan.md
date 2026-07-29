@@ -53,8 +53,9 @@ Locked with the owner:
 
 Definitions:
 - **Anchor chest:** a chest with an explicit/implicit fixed role — it pins/sign-matches an item or
-  category, or is station-adjacent to a category. Anchors are pre-assigned to that bucket and are
-  never repurposed. `FilterSpec.Ignore`/`ManualOnly`/Sorter chests are excluded as targets entirely.
+  category, is station-adjacent to a category, **or carries a `psort_home` marker from a previous run
+  (see §4.1)**. Anchors are pre-assigned to that bucket and are never repurposed.
+  `FilterSpec.Ignore`/`ManualOnly`/Sorter chests are excluded as targets entirely.
 - **Free chest:** any other accessible chest. Its current contents are fair game to redistribute, so
   its full capacity is available to the allocator.
 
@@ -78,6 +79,33 @@ Steps:
 Capacity: use the real chest size — `inv.GetWidth() * inv.GetHeight()` total slots and
 `inv.GetEmptySlots()` for free space; support modded chest sizes. Slot demand treats each distinct
 item type as needing its own stacks (`ceil(count / maxStack)`), because a slot holds one item type.
+
+### 4.1 Claimed homes must be remembered (resolves §16.1 — REQUIRED, not optional)
+
+Steps 4 and 6 above are only correct if a chest claimed as a bucket's home is still recognised as that
+bucket's home on the *next* run. Nothing in v1 records that, and step 4's preference list asks for an
+**empty** chest — so a chest claimed on run 1 is no longer empty on run 2, fails the preference test, a
+different empty chest is claimed instead, and step 6 relocates the entire spill. It never converges;
+a bucket with no other anchor moves 100% of itself on every press.
+
+**The rule:** when the allocator claims a free chest as a home for bucket B, it writes B's key into that
+chest's ZDO under a new `psort_home` string key. On every later run that marker makes the chest an
+anchor for B (step 2), so the bucket keeps the same physical chests and step 6's churn minimisation
+does what it claims.
+
+Details:
+- **Storage:** one string per chest, same pattern as `psort_items`/`psort_manual` in `Filters` — set
+  with a defensive `ClaimOwnership`, and it syncs and saves with the world like every other flag.
+- **Written only for chests the allocator itself claims.** Pin-, sign- and station-derived anchors
+  already re-derive every run and must NOT be marked; marking them would freeze a station chest's
+  role even after the station is torn down.
+- **Cleared by:** the existing Clear button (alongside pins), and by the allocator itself when a
+  marked chest is no longer needed by its bucket — otherwise a base that shrinks keeps dead homes
+  reserved forever.
+- **Stale markers are advisory, never authoritative.** A marker naming a bucket that no longer exists
+  (renamed group, changed config) is ignored and cleared, exactly like a dead anchor in §16.4.6.
+- **Test:** run Organize twice on a messy base; the second run must move zero items. That is §12's
+  acceptance test, and it is currently unmeetable without this.
 
 ## 5. Classification (one bucket per item)
 
@@ -125,12 +153,23 @@ items still.
   m_itemType), map allocator moves back to Containers, drive the multi-pass execution.
 - ADD gear classification helper (m_itemType → weapon/armor/tool) — new `Core/Gear.cs` or inside
   Organizer; keep it data-driven and logged for unmapped types.
-- CONFIG (`Plugin.cs`): add `[Organize] IncludeGear` (bool, default true) so the weapon/armor/tool
-  sweep can be turned off; keep `MovesPerTick`, `StationRange`. Consider `[Organize] MaxPasses`
-  (default 6, hidden/admin).
-- `Patches/GuiPatch.cs`: preview text can stay ("move N items across M chests"); optionally add the
-  under-provisioned count. Button visibility unchanged (Sorter only).
-- CHANGELOG + version bump.
+- **ADD the `psort_home` key to `Core/Filters.cs`** (§4.1): getter, setter and clear, following the
+  `psort_items`/`psort_manual` pattern, plus clearing it from the existing Clear button path. Without
+  this the allocator has no fixed point — treat it as part of the core feature, not a nicety.
+- CONFIG: add `[Organize] IncludeGear` (bool, default true) so the weapon/armor/tool sweep can be
+  turned off; consider `[Organize] MaxPasses` (default 6, hidden/admin). **Bind these in
+  `Core/OrganizeConfig.cs`, not `Plugin.cs`** — Wave 0 moved the section there; `Plugin` keeps
+  forwarding properties for `MovesPerTick`/`StationRange`, so existing readers are unaffected.
+- `Patches/GuiPatch.cs` (scoped — see roadmap §3): preview text can stay ("move N items across M
+  chests"); optionally add the under-provisioned count. Button visibility unchanged (Sorter only).
+  Also show Pin/Manual/Clear on EMPTY chests (§16.10) — today the toggle only appears once a chest has
+  pins, so the empty chests the allocator claims cannot be opted out of.
+- Wave 0 already landed the read-only accessors this plan assumes: `Groups.GroupsInOrder()`,
+  `Stations.StationsInRange(pos, range)`, `ContainerTracker.CandidatesWithDistance(...)`. Use them
+  rather than adding parallel ones.
+- `tests/OrganizePlannerTests/` is W1's (roadmap §3): it binds `OrganizePlanner.Plan` and `ChestView`
+  directly, so the rewrite breaks it until updated. Add the §16.5 cases while you are there.
+- NO version bump, NO CHANGELOG edit — superseded by roadmap §2/§4/§6; the integrator owns 2.0.0.
 
 ## 9. Config additions
 - `[Organize] IncludeGear = true` — sweep tools/armor/weapons into their three buckets.
@@ -415,7 +454,10 @@ Three independent hostile reviews of the allocation math, the execution phase an
 target. Everything below is traced to code or arithmetic. **§16.1 breaks the design's own acceptance
 test and must be fixed before W1 starts; §16.2 is an item-loss set; §16.3 is scale.**
 
-### 16.1 The allocator has no fixed point (BLOCKER — invalidates §7, §13 and the §12 re-run test)
+### 16.1 The allocator has no fixed point — RESOLVED IN SPEC, see §4.1
+*(The analysis below stands as the reason. The fix — a `psort_home` marker written when the allocator
+claims a chest, read back as an anchor — is now written into the algorithm at §4.1 and into the file
+list at §8. W1 builds from those.)*
 
 **Nothing persists a claimed home.** §4 step 4 requires an *empty* chest to claim, and run 1 makes its
 own claimed chests non-empty. Nothing is written to the claimed chest's ZDO — no pin, no sign, no
