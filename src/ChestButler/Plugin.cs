@@ -47,15 +47,19 @@ namespace ChestButler
             // 1.1.2: the floor was 0.2 s. Each tick can cost a full base scan per item type in the
             // sorter, so 20 sorters at 5 ticks/s was enough to eat a core on a large base. The
             // default was already 1.0; this only removes the settings that were never safe.
+            // NOT admin-only, deliberately: the two rate knobs below change only how FAST this client
+            // works, never what the result is, so a player on a weak machine can turn them down
+            // without an admin. Everything that changes the OUTCOME (radius, item groups, station map)
+            // stays admin-only and server-synced — two clients computing different answers for the same
+            // base would be a correctness bug, not a preference. The mod also self-throttles, so these
+            // are a ceiling rather than a tuning knob.
             TransferInterval = Config.Bind("Sorting", "TransferInterval", 1.0f,
-                new ConfigDescription("Seconds between transfer ticks per sorter.",
-                    new AcceptableValueRange<float>(1f, 10f),
-                    new ConfigurationManagerAttributes { IsAdminOnly = true }));
+                new ConfigDescription("Seconds between transfer ticks per sorter. Client-side: raise it if the mod costs you frames.",
+                    new AcceptableValueRange<float>(1f, 10f)));
 
             StacksPerTick = Config.Bind("Sorting", "StacksPerTick", 2,
-                new ConfigDescription("How many item stacks a sorter moves per tick.",
-                    new AcceptableValueRange<int>(1, 8),
-                    new ConfigurationManagerAttributes { IsAdminOnly = true }));
+                new ConfigDescription("How many item stacks a sorter moves per tick. Client-side.",
+                    new AcceptableValueRange<int>(1, 8)));
 
             ContainsFallback = Config.Bind("Sorting", "ContainsFallback", true,
                 new ConfigDescription("Route items to chests that already contain them when no explicit filter matches.",

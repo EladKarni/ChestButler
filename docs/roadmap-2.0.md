@@ -351,6 +351,28 @@ Why do it before 2.0 rather than folding it in:
 
 Do it as `fix/1.1.2` off `dev`, integrator-owned versioning as usual, then rebase Wave 0 on top.
 
+## 9c. Decisions closed (do not reopen)
+- **Tidy mode → 2.1.** Not built in 2.0. v2 plan §15.
+- **`sort: off` / `ignore` = leave the chest entirely alone** (neither source nor target). The Manual
+  toggle keeps "never auto-filled, but Organize may take from it"; Sorter chests stay sources.
+  Implementation: split `ChestView.ExcludedAsTarget` into `ExcludedAsTarget` + `ExcludedAsSource`.
+  v2 plan §4 exclusion table + §16.4.5. **The sign syntax is undocumented in the README** — now that
+  `off` protects a personal stash, release-prep must document `sort:`, group names, `pN` and `off`.
+- **Rate knobs are client-side** (`TransferInterval`, `StacksPerTick`, `[Organize] MovesPerTick` — landed
+  on `dev`); result-affecting settings stay admin-only and server-synced. **W1 also builds
+  self-throttling**, v2 plan §16.6, which makes those knobs a ceiling rather than a tuning dial.
+- **Design target: 400+ chests** until measured.
+
+## 9d. Plan completeness — what is and is not build-ready
+- **W1 is build-ready.** `docs/organize-v2-allocation-plan.md` §1–§13 (design) + §4.1, §15, §16
+  (corrections, which override). Every open decision it depended on is closed.
+- **W2, W3, W4 are sketches** — one §7 paragraph each plus the audit's API corrections. That is
+  deliberate: writing them now would mean designing against unverified APIs, and the audit showed that
+  is exactly where plan-level errors come from. **Write each workstream's detailed plan at the start of
+  its turn**, after verifying its APIs against the reference assemblies.
+- **New-agent handoff: `docs/agent-handoff-2.0.md`** — environment constraints, rules, closed decisions
+  and open questions in one place. Give that to whoever picks this up.
+
 ## 10. Next actions
 1. **Ship 1.1.2** (§9b) — `docs/known-issues-1.1.x.md`. Independent of everything else, auto-deploys.
 2. **Land Wave 0 on `dev` — now recommended, not optional** (§5): init stubs, `[Organize]` config
