@@ -101,8 +101,29 @@ footprint by five files**):
 - Everyone follows the shared build rules in §6.
 
 ## 5. Waves, branches, merge order
-Base branch: **dev** (currently the 1.1.1 tip). Every workstream = a feature branch off `dev`; agents
-should work in **isolated git worktrees** so they never share a working tree.
+
+> **EXECUTION MODEL CHANGED — the workstreams run SERIALLY, in one working tree.**
+>
+> The original plan was three agents in three git worktrees, running concurrently. That was probed and
+> it does not work in this environment: a worktree checks out fine, but every git *write* goes through
+> the shared `.git` directory in the synced project folder, where lock files (`index.lock`,
+> `HEAD.lock`, `packed-refs.lock`) cannot be removed once created. Each git command therefore leaves a
+> lock that makes the next one fail until it is manually moved aside. One agent can work around that;
+> three committing concurrently would race on the cleanup, and a lost race corrupts the index rather
+> than failing safely.
+>
+> **What this changes:** the wave structure below, and nothing else. §3's file-ownership matrix and §4's
+> collision rules are still worth following to the letter — serial execution makes conflicts *unlikely*,
+> but the matrix is also the map of what each workstream is allowed to touch, and W1 in particular
+> reaches into six shared files. Keep the branch-per-workstream discipline so each piece stays
+> revertible on its own.
+>
+> **If the parallel model is wanted later**, it needs the work to run somewhere git owns the filesystem
+> outright — e.g. on the owner's machine rather than through a synced mount. That is a change of venue,
+> not a change of plan: everything in §3 applies unchanged.
+
+Base branch: **dev**. Every workstream is still a feature branch off `dev`, but they are built one at a
+time in a single working tree — branch, build, test, merge to `dev`, then start the next.
 
 - **Wave 0 — Foundation (small, land first, ~30–60 min):** introduce a **modular-init** pattern so
   each feature registers itself. Add empty stubs `OrganizeConfig.Init(ConfigFile)`, `Gather.Init(...)`,
@@ -116,26 +137,45 @@ should work in **isolated git worktrees** so they never share a working tree.
   - three append-only accessors: `Groups.GroupsInOrder()`, `Stations.StationsInRange(pos, range)`,
     `ContainerTracker.CandidatesWithDistance(...)` (see §3);
   - the csproj check, plus W3's `<EmbeddedResource>` line if the csproj does not glob.
-- **Wave 1 — Parallel (3 agents, disjoint files):** `feat/organize-v2` (W1), `feat/gather` (W2),
-  `feat/sorter-chest` (W3), each branched off `dev` after Wave 0. They run fully concurrently.
-- **Wave 2 — Integration (serial):** merge W1, W2, W3 into `dev` (any order — trivial conflicts), then
-  run `feat/gamepad` (W4) off the updated `dev` so the Organize + Gather buttons exist to wire up.
+- **Wave 1 — one workstream at a time**, each on its own branch off the current `dev`, merged before
+  the next begins. Order is **W1 → W2 → W3**, and that order now matters:
+  1. **`feat/organize-v2` (W1)** first, because it is the largest, it rewrites the two files the chest
+     UI compiles against, and W3 depends on its treatment of default-sorter chests. **Do not start it
+     until v2 plan §16.1 is resolved in the spec** — the allocator has no fixed point without the
+     persisted-home key, and an agent reading the current text would build the broken version.
+  2. **`feat/gather` (W2)** second. Genuinely independent of W1 (crafting panel vs chest panel), so it
+     is the natural fallback if W1 stalls.
+  3. **`feat/sorter-chest` (W3)** third, once W1's allocator can claim default-sorter chests as homes.
+- **Wave 2 — `feat/gamepad` (W4)** off the updated `dev`, after the Organize and Gather buttons exist.
 - **Wave 3 — Release-prep (integrator):** single 2.0.0 version bump across csproj/Plugin/manifest,
   consolidated CHANGELOG + README/Thunderstore copy, build, single-player test pass, then the
   coordinated 2.0 release + manual server deploy.
 
-Merge order into `dev`: **W1 → W2 → W3 → W4 → release-prep** (W1–W3 order doesn't matter).
+Merge order into `dev`: **W1 → W2 → W3 → W4 → release-prep** (this is now the build order too).
+
+**Serial-execution notes.** Only one branch is checked out at a time, and switching branches in the
+synced folder is itself unreliable (the same lock/unlink limitation) — so prefer *finishing and merging*
+a workstream over parking it half-done and switching away. Merging is safest as a fast-forward pointer
+move (`git branch -f`) rather than checkout-and-merge, which needs git to rewrite the working tree.
 
 ## 6. Shared rules baked into every agent prompt
-- Work ONLY on your branch, and edit ONLY your OWNED files (+ your one-line `Plugin.cs` stub).
+- Work ONLY on your branch, and edit ONLY your OWNED files (+ your declared TOUCHES from §3).
 - Do NOT bump the version or edit `pkg/CHANGELOG.md`/`pkg/manifest.json`/`pkg/README.md` — the
   integrator owns 2.0.0. Put a "what changed" summary in your commit body.
-- Write/edit `.cs` files with a **bash heredoc**, never the Edit/Write tools (the synced mount
-  truncates files mid-edit). After each write: `wc -l file && tail -1 file`.
-- Build offline with `dotnet build src/ChestButler/ChestButler.csproj -c Release --no-incremental`.
-  **Do NOT run `./build.sh`** — it installs into a single shared r2modman profile and cache outside your
-  worktree, so concurrent agents clobber each other (see §4). The integrator builds and installs in Wave 3.
-- Verify your build by md5-diff of the produced DLL + grepping it for a known new string.
+- **Edit in a scratch copy, build there, then write finished files back to the project folder.** The
+  project folder is a synced mount: in-place editors can truncate files mid-write, and git cannot remove
+  its own lock files there, so every git command must have `index.lock`/`HEAD.lock` moved aside first.
+  Treat the mount as a delivery target, not a workspace.
+- Build offline with `dotnet build src/ChestButler/ChestButler.csproj -c Release --no-incremental`
+  against the DLLs in `Managed/` and `libs/`. **Do NOT run `./build.sh`** — it installs into a shared
+  r2modman profile and mod-manager cache outside the project, and its cache-sync loop overwrites every
+  cached version, not just the one the target profile uses. The integrator builds and installs in Wave 3.
+- Verify your build by md5-diff of the produced DLL + grepping it for a known new string. Note .NET
+  string literals are UTF-16, so use `strings -el` for those and plain `strings` for symbol names.
+- **Verify every game/Jotunn/MultiUserChest API against the reference assemblies before using it.**
+  Field and member names can be read straight out of `Managed/assembly_valheim.dll` and `libs/*.dll`;
+  the audit found three plan-level claims that were wrong and one static initializer that would have
+  taken down a whole patch class had the field name been off.
 - Never write to a chest inventory directly — every transfer goes through MultiUserChest's
   `ContainerHandler` (copy `Puller`/`Organizer`). This is the one inviolable rule.
 - Unit-test any pure logic offline (no Unity); leave a single-player test script in your commit body.
