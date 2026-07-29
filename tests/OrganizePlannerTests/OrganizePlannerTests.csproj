@@ -19,6 +19,11 @@
     <!-- Names is the other genuinely Unity-free file: pure string matching, and 1.1.2 rewrote it
          (ordinal comparisons + cached token parsing), so it needs a regression net. -->
     <Compile Include="../../src/ChestButler/Core/Names.cs" Link="Names.cs" />
+    <!-- W1: the allocator's bucket-key formats are persisted into chest ZDOs (psort_home), so the
+         format is a contract worth asserting; and GroupTables holds the group order whose coverage
+         §16.4.3 asks for a test on. Both are deliberately Unity-free and config-free. -->
+    <Compile Include="../../src/ChestButler/Core/BucketKeys.cs" Link="BucketKeys.cs" />
+    <Compile Include="../../src/ChestButler/Core/GroupTables.cs" Link="GroupTables.cs" />
   </ItemGroup>
 
 </Project>

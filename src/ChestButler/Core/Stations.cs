@@ -299,6 +299,94 @@ namespace ChestButler.Core
             return hits;
         }
 
+        // ---------- W1 (Organize v2): one shared station pass ----------
+        // APPEND ONLY (roadmap §4). GroupsForChest answers "what does THIS chest inherit", which costs
+        // a full station scan per chest — §16.3 measured that as a top cost at 400 chests, and §15.8's
+        // Router parity fix would have put it on the sorter TICK path, once per candidate per item per
+        // second. Both callers now share one cached spatial pass and a cheap per-chest lookup over it.
+
+        private static List<StationHit> _cachedHits;
+        private static Vector3 _cachedCenter;
+        private static float _cachedRadius;
+        private static float _cachedAt = -1f;
+
+        /// <summary>Station hits around a point, reusing the previous pass when it still covers the
+        /// query and is fresh. The cache is intentionally coarse: stations do not move, and a newly
+        /// built one starting to attract items up to <paramref name="ttl"/> seconds late is invisible.</summary>
+        internal static List<StationHit> HitsAround(Vector3 center, float radius, float ttl)
+        {
+            bool usable =
+                _cachedHits != null &&
+                Time.time - _cachedAt < ttl &&
+                _cachedRadius >= radius &&
+                Vector3.Distance(_cachedCenter, center) <= Mathf.Max(0f, _cachedRadius - radius);
+
+            if (usable) return _cachedHits;
+
+            _cachedHits = StationsInRange(center, radius);
+            _cachedCenter = center;
+            _cachedRadius = radius;
+            _cachedAt = Time.time;
+            return _cachedHits;
+        }
+
+        /// <summary>Groups attracted by the nearest MAPPED station within <paramref name="range"/> of a
+        /// point, picked out of an already-computed hit list. Same winner and same tie-break as
+        /// <see cref="GroupsForChest"/>: nearest mapped station, then the token name, so an equidistant
+        /// forge/stonecutter pair resolves identically on every client and every relog.</summary>
+        internal static List<string> GroupsNear(List<StationHit> hits, Vector3 pos, float range)
+        {
+            if (hits == null) return Empty;
+            List<string> best = null;
+            string bestToken = null;
+            float bestD = range;
+
+            for (int i = 0; i < hits.Count; i++)
+            {
+                var hit = hits[i];
+                if (hit.Groups == null || hit.Groups.Count == 0) continue;   // unmapped never shadows
+                float d = Vector3.Distance(hit.Position, pos);
+                if (d > range) continue;
+                if (best == null || d < bestD ||
+                    (d == bestD && bestToken != null && string.CompareOrdinal(hit.Token, bestToken) < 0))
+                {
+                    best = hit.Groups;
+                    bestToken = hit.Token;
+                    bestD = d;
+                }
+            }
+            return best ?? Empty;
+        }
+
+        // Per-chest memo over the cached pass. Router needs this per candidate per item per tick, so
+        // even an O(stations) lookup per candidate would be too much; neither chests nor stations move,
+        // so a short TTL is safe. Dead keys are pruned opportunistically, like Processors.
+        private static readonly Dictionary<Container, KeyValuePair<float, List<string>>> ChestGroups =
+            new Dictionary<Container, KeyValuePair<float, List<string>>>();
+        private static readonly List<Container> DeadChests = new List<Container>();
+
+        /// <summary>Cached per-chest station groups, for hot paths. <see cref="GroupsForChest"/> stays
+        /// the uncached, logging version.</summary>
+        internal static List<string> GroupsForChestCached(Container c, Vector3 center, float radius,
+                                                          float range, float ttl)
+        {
+            if (c == null) return Empty;
+            if (ChestGroups.TryGetValue(c, out var hit) && Time.time - hit.Key < ttl)
+                return hit.Value;
+
+            if (ChestGroups.Count > 256)
+            {
+                foreach (var kv in ChestGroups) if (kv.Key == null) DeadChests.Add(kv.Key);
+                foreach (var d in DeadChests) ChestGroups.Remove(d);
+                DeadChests.Clear();
+            }
+
+            var hits = HitsAround(center, radius, ttl);
+            var groups = GroupsNear(hits, c.transform.position, range);
+            ChestGroups[c] = new KeyValuePair<float, List<string>>(Time.time, groups);
+            return groups;
+        }
+
         private static void Consider(string mName, float d,
             ref string bestMapped, ref float bestMappedD, ref string bestUnmapped, ref float bestUnmappedD)
         {

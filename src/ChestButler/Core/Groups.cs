@@ -8,39 +8,10 @@ namespace ChestButler.Core
     /// Users can edit any group or add tokens for modded items.</summary>
     internal static class Groups
     {
-        private static readonly Dictionary<string, string> Defaults = new Dictionary<string, string>
-        {
-            { "stone",     "stone, flint, obsidian, blackmarble, grausten*" },
-            { "wood",      "wood, finewood, roundlog, elderbark, yggdrasilwood, blackwood" },
-            // NOTE: metal scrap tokens are singular in-game (ironscrap, bronzescrap, copperscrap) —
-            // a '*scraps' wildcard misses all of them and instead catches leatherscraps (hides).
-            { "ores",      "*ore, ironscrap, bronzescrap, copperscrap, flametalore*" },
-            { "metals",    "copper, tin, bronze, iron, silver, blackmetal*, flametal*" },
-            { "cooking",   "carrot, turnip, onion, raspberries, blueberries, cloudberries, mushroom*, jotunpuffs, magecap, honey, barley, bread*, sausages" },
-            { "meat",      "*meat*, necktail, entrails, bloodbag, fish*" },
-            { "seeds",     "*seeds*, acorn, ancientseed, beechnut, carrotseed, turnipseed, onionseed" },
-            { "trophies",  "trophy*" },
-            { "valuables", "coins, ruby, amber, amberpearl, silvernecklace" },
-            { "meads",     "mead*, barleywine*" },
-            { "ammo",      "arrow*, bolt*, turretbolt*" },
-            { "hides",     "*hide*, *pelt*, leatherscraps, chitin" },
-            { "fuel",      "coal" },
-        };
-
-        /// <summary>The one authoritative group order (1.1.2). Some items legitimately match two
-        /// groups — FlametalOre hits both `ores` ("*ore") and `metals` ("flametal*") in the shipped
-        /// defaults — so anything that has to pick ONE group for an item needs a fixed precedence.
-        /// It must NOT be dictionary iteration order: that is hash-bucket order, which is stable
-        /// within a process but shifts when a group is added, silently re-homing a whole category.
-        ///
-        /// Order rationale: the narrower, more specific categories come first, so a refined metal is
-        /// treated as a metal rather than as ore.</summary>
-        private static readonly string[] GroupOrder =
-        {
-            "metals", "ores", "stone", "wood", "fuel",
-            "cooking", "meat", "seeds", "meads",
-            "ammo", "hides", "valuables", "trophies",
-        };
+        // W1: the tables moved to Core/GroupTables.cs so the offline suite can assert GroupOrder and
+        // the group table cannot drift apart (§16.4.3). Behaviour here is unchanged.
+        private static Dictionary<string, string> Defaults => GroupTables.Defaults;
+        private static string[] GroupOrder => GroupTables.GroupOrder;
 
         private static readonly Dictionary<string, ConfigEntry<string>> Entries =
             new Dictionary<string, ConfigEntry<string>>();
