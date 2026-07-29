@@ -40,6 +40,35 @@ namespace ChestButler.Core
             nv.GetZDO().Set(SorterHash, on);
         }
 
+        // ---------- WAVE 0 STUBS — owned by W3 (Dedicated Sorter Chest) ----------
+        // Two keys, not one: a spawn-default that only writes SorterHash would re-enable Sorter on
+        // every zone reload, because GetBool cannot distinguish "never set" from "player turned it
+        // off". WasDefaulted records that the default has already been applied once.
+        //
+        // Rule for this file (see roadmap §4): APPEND ONLY, at the end of the class. Do not reorder
+        // or reformat existing members — more than one workstream lands here.
+
+        private static readonly int DefaultedHash = "psort_defaulted".GetStableHashCode();
+
+        /// <summary>Has this chest already had its spawn-time Sorter default applied?</summary>
+        internal static bool WasDefaulted(Container c)
+        {
+            var nv = NView(c);
+            return nv != null && nv.IsValid() && nv.GetZDO().GetBool(DefaultedHash, false);
+        }
+
+        /// <summary>Apply the "this piece is a Sorter out of the box" default exactly once, then
+        /// leave the player in control of the toggle forever after.</summary>
+        internal static void SetSorterDefault(Container c, bool on)
+        {
+            var nv = NView(c);
+            if (nv == null || !nv.IsValid()) return;
+            if (WasDefaulted(c)) return;                  // already decided; never override the player
+            if (!nv.IsOwner()) nv.ClaimOwnership();
+            nv.GetZDO().Set(SorterHash, on);
+            nv.GetZDO().Set(DefaultedHash, true);
+        }
+
         /// <summary>Vanilla per-container access check (private chests etc.) for the local player.</summary>
         internal static bool PlayerCanAccess(Container c)
         {

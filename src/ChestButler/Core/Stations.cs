@@ -230,6 +230,75 @@ namespace ChestButler.Core
         /// per session instead of once per chest per Organize.</summary>
         private static readonly HashSet<string> Hinted = new HashSet<string>();
 
+        /// <summary>A station-like piece found near a point, with the groups it attracts.</summary>
+        internal struct StationHit
+        {
+            internal string Token;            // the piece's m_name
+            internal Vector3 Position;
+            internal float Distance;
+            internal List<string> Groups;     // empty when the token has no [Stations] mapping
+        }
+
+        /// <summary>WAVE 0 — every station-like piece within <paramref name="range"/> of a point.
+        ///
+        /// <see cref="GroupsForChest"/> answers "what does THIS chest inherit", which forces a full
+        /// station scan per chest — the single most expensive thing Organize does at scale. Organize
+        /// v2 needs the inverse ("where is the forge, so I can claim an empty chest next to it") and
+        /// needs to scan once per run rather than once per chest. Both are this call.
+        ///
+        /// Unlike GroupsForChest this does NOT log and does not pick a winner; it returns everything
+        /// in range, nearest first, so the caller can build its own index.</summary>
+        internal static List<StationHit> StationsInRange(Vector3 point, float range)
+        {
+            var hits = new List<StationHit>();
+
+            var all = AllStationsField != null ? AllStationsField.GetValue(null) as List<CraftingStation> : null;
+            if (all != null)
+            {
+                foreach (var st in all)
+                {
+                    if (st == null || !IsReal(st)) continue;      // vanilla lists placement ghosts too
+                    float d = Vector3.Distance(st.transform.position, point);
+                    if (d > range) continue;
+                    hits.Add(new StationHit
+                    {
+                        Token = st.m_name,
+                        Position = st.transform.position,
+                        Distance = d,
+                        Groups = GroupsForStationName(st.m_name),
+                    });
+                }
+            }
+
+            foreach (var kv in Processors)
+            {
+                if (kv.Key == null) { Dead.Add(kv.Key); continue; }
+                if (!IsReal(kv.Key)) continue;
+                float d = Vector3.Distance(kv.Key.transform.position, point);
+                if (d > range) continue;
+                hits.Add(new StationHit
+                {
+                    Token = kv.Value,
+                    Position = kv.Key.transform.position,
+                    Distance = d,
+                    Groups = GroupsForStationName(kv.Value),
+                });
+            }
+            if (Dead.Count > 0)
+            {
+                foreach (var dead in Dead) Processors.Remove(dead);
+                Dead.Clear();
+            }
+
+            // Deterministic: distance, then token name for equidistant pieces.
+            hits.Sort((a, b) =>
+            {
+                int d = a.Distance.CompareTo(b.Distance);
+                return d != 0 ? d : string.CompareOrdinal(a.Token, b.Token);
+            });
+            return hits;
+        }
+
         private static void Consider(string mName, float d,
             ref string bestMapped, ref float bestMappedD, ref string bestUnmapped, ref float bestUnmappedD)
         {

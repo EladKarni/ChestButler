@@ -66,6 +66,29 @@ namespace ChestButler.Core
             return sorted;
         }
 
+        /// <summary>A candidate chest together with its distance from the query point.</summary>
+        internal struct Candidate
+        {
+            internal Container Chest;
+            internal float Distance;
+        }
+
+        /// <summary>WAVE 0 — same query as <see cref="Candidates"/>, but keeps the distances.
+        ///
+        /// Organize v2 needs them: it places a bucket's overflow "nearest-first within the bucket"
+        /// and picks new homes by distance to a station or to the origin sorter, and the plain
+        /// Candidates call throws that information away. Ordering is identical (distance, then ZDO
+        /// uid), so the two never disagree about which chest is nearer.</summary>
+        internal static List<Candidate> CandidatesWithDistance(Container sorter, float radius, bool excludeSorters = true)
+        {
+            var chests = Candidates(sorter, radius, excludeSorters);
+            var result = new List<Candidate>(chests.Count);
+            var pos = sorter.transform.position;
+            foreach (var c in chests)
+                result.Add(new Candidate { Chest = c, Distance = Vector3.Distance(pos, c.transform.position) });
+            return result;
+        }
+
         /// <summary>Stable, session-independent ordering for two live containers.</summary>
         internal static int CompareUid(Container a, Container b)
         {
