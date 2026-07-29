@@ -18,11 +18,12 @@ namespace ChestButler.Core
 
         internal static void Init(ConfigFile config)
         {
+            // Rate only, so client-side and NOT admin-only (see the note in Plugin.Awake).
             MovesPerTick = config.Bind("Organize", "MovesPerTick", 4,
                 new ConfigDescription("How many item moves the Organize sweep performs per frame (higher = faster, more hitch). " +
-                    "The rate is additionally capped in real time, so a high-refresh-rate client does not send proportionally more traffic.",
-                    new AcceptableValueRange<int>(1, 16),
-                    new ConfigurationManagerAttributes { IsAdminOnly = true }));
+                    "The rate is additionally capped in real time, so a high-refresh-rate client does not send proportionally more traffic. " +
+                    "Client-side: lower it if Organize costs you frames.",
+                    new AcceptableValueRange<int>(1, 16)));
 
             StationRange = config.Bind("Organize", "StationRange", 8f,
                 new ConfigDescription("Max distance (m) from a chest to a crafting station for the chest to inherit that station's item groups during Organize. Nearest mapped station wins. " +

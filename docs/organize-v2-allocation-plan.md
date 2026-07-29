@@ -55,7 +55,17 @@ Definitions:
 - **Anchor chest:** a chest with an explicit/implicit fixed role — it pins/sign-matches an item or
   category, is station-adjacent to a category, **or carries a `psort_home` marker from a previous run
   (see §4.1)**. Anchors are pre-assigned to that bucket and are never repurposed.
-  `FilterSpec.Ignore`/`ManualOnly`/Sorter chests are excluded as targets entirely.
+- **Exclusion is now TWO separate things (owner decision — resolves §16.4.5).** v1 collapsed them:
+  | flag | set by | target? | source? |
+  |---|---|---|---|
+  | `Ignore` | a sign reading `sort: off` (or `ignore` / `none`) | no | **no — leave the chest completely alone** |
+  | `ManualOnly` | the **Manual** toggle in the chest UI | no | yes (a buffer you restock with Pull) |
+  | Sorter chest | the Sorter toggle | no | yes (draining it IS the feature) |
+
+  `sort: off` is the true opt-out: a personal stash marked that way is never read and never written.
+  Manual keeps its existing "never auto-filled, but Organize may still take from it" meaning. This
+  matters far more in v2 than v1, because v2 finds a home for *everything* rather than only for items
+  that already had one — see §16.4.5 for the failure it prevents.
 - **Free chest:** any other accessible chest. Its current contents are fair game to redistribute, so
   its full capacity is available to the allocator.
 
@@ -149,6 +159,8 @@ items still.
   adapter and passed in, OR pass the classifier delegate).
 - EXTEND `ChestView` (in OrganizePlanner.cs): add `TotalSlots`, `IsAnchorFor(bucketKey)`, and the
   station→bucket info already present via `StationAttracts`. Add each stack's resolved `BucketKey`.
+  **Also split `ExcludedAsTarget` into `ExcludedAsTarget` + `ExcludedAsSource`** (§4 exclusion table)
+  and honour the latter in the stack-enrollment loop — that is the `sort: off` fix.
 - UPDATE `Core/Organizer.cs`: build the richer views (capacity, classification via Groups/Stations/
   m_itemType), map allocator moves back to Containers, drive the multi-pass execution.
 - ADD gear classification helper (m_itemType → weapon/armor/tool) — new `Core/Gear.cs` or inside
@@ -526,10 +538,14 @@ converge and v2 is worse than v1.** Add it to §8's file list and to the roadmap
   4/tick at 60 fps = 240 RPC/s; 16/tick at 144 fps = 2,304 RPC/s from one client. *Replace with
   `OrganizeMovesPerSecond` (default 25, range 5–100) plus `OrganizeMaxMovesPerRun` (default 500, "press
   again to continue"), and cap outstanding requests at ~8 with a deadline.*
-- **Config surface:** every entry is `IsAdminOnly`, so a non-admin on a dedicated server cannot turn down
-  a mod costing them 40 fps — un-admin-lock the client-side perf knobs. `TransferInterval`'s 0.2 s floor
-  is the worst value in the file (20 sorters = 100 ticks/s). `StationRange` is misleading: it changes no
-  cost, since `GroupsForChest` scans every station regardless.
+- **Config surface — DECIDED, both halves.** (a) The three rate knobs (`TransferInterval`,
+  `StacksPerTick`, `[Organize] MovesPerTick`) are **un-admin-locked**, so a player on a weak machine can
+  turn the mod down without an admin. Landed already; the ranges still cap how far a client can turn it
+  *up*. Result-affecting settings (radius, groups, stations) stay admin-only and server-synced, because
+  two clients computing different answers for the same base is a correctness bug, not a preference.
+  (b) **W1 additionally builds self-throttling** — see §16.6. `TransferInterval`'s 0.2 s floor was
+  already raised to 1.0 s in 1.1.2. `StationRange` remains misleading: it changes no cost, since station
+  detection scans everything regardless (use `Stations.StationsInRange` once per run instead).
 - **If the Dedicated Sorter Chest (W3) ships, sorter count scales with base size** and total cost becomes
   O(C²). Hoist `Candidates` into one shared per-tick spatial cache before that piece ships.
 
@@ -562,13 +578,17 @@ converge and v2 is worse than v1.** Add it to §8's file list and to the roadmap
    silently misfiled rather than logged, because the catch-all means nothing is ever "unmapped". *Fix:
    make the three gear buckets token-driven like every other group, seeded from an `m_itemType` map, and
    give the catch-all its own `gearmisc` bucket that logs every type it absorbs.*
-5. **`sort: off` does not protect a chest's contents.** `ExcludedAsTarget` is tested in `AnyTargetPins`
-   and `PickBest` but **not in the stack-enrollment loop**, so an Ignore/ManualOnly chest is still
-   enrolled as a *source*. §4's wording ("excluded as targets entirely") matches the code and is the
-   bug. A personal stash marked `sort: off` is emptied into the communal base on the first press. v1 is
-   milder (it only moved items that already had a home); v2 organizes everything, so this escalates from
-   "sometimes leaks" to "always loots". *Fix: one line — `if (c.ExcludedAsTarget) continue;` in
-   enrollment. Decide deliberately whether `ManualOnly` is source-exempt too; `Ignore` unambiguously is.*
+5. **`sort: off` does not protect a chest's contents. — DECIDED, see the exclusion table in §4.**
+   `ExcludedAsTarget` is tested in `AnyTargetPins` and `PickBest` but **not in the stack-enrollment
+   loop**, so an Ignore/ManualOnly chest is still enrolled as a *source*. A personal stash marked
+   `sort: off` is emptied into the communal base on the first press. v1 is milder (it only moved items
+   that already had a home); v2 organizes everything, so this escalates from "sometimes leaks" to
+   "always loots".
+   **Owner decision:** `sort: off` / `ignore` means *leave the chest entirely alone* — not a source and
+   not a target. `ManualOnly` and Sorter chests stay sources. **Implementation:** split the single
+   `ExcludedAsTarget` flag on `ChestView` into `ExcludedAsTarget` + `ExcludedAsSource`, set the latter
+   only for `Ignore`, and skip source-excluded chests in the enrollment loop. Existing planner test [7]
+   stays valid (it covers the Manual/Sorter case); add a new case for `Ignore`.
 6. **Dead anchors permanently remove chests from the free pool, silently.** A mistyped sign (`sort:
    metal` — not a group, so it becomes an *item token* that nothing matches), a custom group name (the
    `[ItemGroups]` binder only reads the 13 hardcoded keys, so user-added groups are orphans), a
@@ -597,3 +617,28 @@ the shipped code re-plans unexecutable moves forever. **Required additions:** (a
 empty slot, `maxStack` 50 and three unmergeable 20-count stacks, asserting no over-budgeted moves; (b) a
 two-client dedicated-server session over one messy shared hall — that single 10-minute test exercises
 §16.2.1, .2, .3, .4, .7 and .8.
+
+### 16.6 Self-throttling (owner decision — W1 builds this)
+
+The config knobs only help a player who knows they exist, finds the file, and guesses a value. The mod
+should measure its own cost and back off on its own. This replaces the "cap MovesPerTick" half of
+§16.3 and is the mechanism that turns the per-*frame* budget into a real per-*second* one.
+
+**Measure our own work, not the framerate.** Frame time is confounded by every other mod and by the
+GPU, so it cannot be attributed. A `Stopwatch` around the two hot paths — the `SorterBehaviour` tick and
+`Organizer.BuildPlan`/`Run` — measures exactly what we are responsible for.
+
+- **Signal:** a rolling average of "ChestButler milliseconds per second", updated each frame we do work.
+- **Budget:** target ~1 ms/frame (≈6% of a 60 fps frame). Over budget → stretch the sorter tick
+  interval, lengthen the miss cooldown, shrink the move batch. Under budget → recover *gradually*.
+- **Hysteresis is required.** Separate the back-off and recovery thresholds, and never adjust more than
+  once every few seconds, or it will oscillate between fast and slow on a base that is right at the line.
+- **Bounds:** never slower than some floor (or a big base silently stops sorting), never faster than the
+  configured value — config becomes the CEILING, not the tuning knob.
+- **Say so.** Log each adjustment. A mod that quietly throttles itself into a crawl looks broken, and
+  "why isn't my sorter sorting?" must be answerable from the log.
+
+**Only ever throttle RATES.** Never let the throttle touch anything that changes results — radius,
+groups, routing order. Speed may legitimately differ per client; outcomes may not.
+
+Applies to the one-press path, and is a prerequisite for any future continuous mode (§15.5).
