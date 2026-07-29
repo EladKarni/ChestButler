@@ -29,7 +29,10 @@ namespace ChestButler
         // WAVE 0: the [Organize] entries now live in OrganizeConfig so that W1 can add to that
         // section without touching this file, and so no two 2.0 workstreams edit the same region of
         // Plugin.Awake. These forwarders keep every existing reader compiling unchanged.
-        internal static ConfigEntry<int> OrganizeMovesPerTick => OrganizeConfig.MovesPerTick;
+        //
+        // W1: the OrganizeMovesPerTick forwarder is gone with the key it pointed at — the per-FRAME
+        // budget is replaced by [Organize] MovesPerSecond (v2 plan §16.3), read directly from
+        // OrganizeConfig by its only consumer.
         internal static ConfigEntry<float> StationRange => OrganizeConfig.StationRange;
 
         private Harmony _harmony;

@@ -254,7 +254,18 @@ namespace ChestButler.Patches
                     Msg("Pinned: " + string.Join(", ", names) + " (auto-fill on)");
                     Plugin.Log.LogInfo("[pin] " + string.Join(", ", names));
                 }
-                else Msg("Chest is empty. Add sample items first");
+                else
+                {
+                    // W1 (v2 plan §15.10): an EMPTY chest used to dead-end here ("add sample items
+                    // first"), so it could not be opted out of anything — and empty chests are exactly
+                    // what the v2 allocator claims as new bucket homes. Toggling Manual is that escape
+                    // hatch: a Manual chest is never an Organize target.
+                    bool nowManual = !Filters.GetManual(_current);
+                    Filters.SetManual(_current, nowManual);
+                    Msg(nowManual
+                        ? "Chest is empty - marked Manual. Organize will not claim or fill it"
+                        : "Manual off. Organize may claim this empty chest as a home");
+                }
             }
             else
             {
@@ -271,6 +282,9 @@ namespace ChestButler.Patches
             if (_current == null) return;
             Filters.ClearPinned(_current);
             Filters.SetManual(_current, false);
+            // W1 (v2 plan §4.1): Clear also releases a home the allocator claimed, otherwise a chest
+            // Organize adopted can never be handed back — the marker would keep making it an anchor.
+            Filters.ClearHome(_current);
             Msg("Filters cleared");
             Refresh();
         }
@@ -288,13 +302,23 @@ namespace ChestButler.Patches
         {
             if (_current == null) return;
 
-            // second press on the same chest within the window -> execute the previewed plan
+            // second press on the same chest within the window -> RE-PLAN, then execute
             if (_pendingPlan != null && _pendingChest == _current && Time.time - _pendingAt <= ConfirmWindow)
             {
                 if (Time.time - _pendingAt < MinConfirmDelay) return;   // accidental double-click: keep the preview
-                var plan = _pendingPlan;
+                var chest = _current;
                 ClearPending();
-                Organizer.Execute(plan);
+
+                // v2 plan §16.2.6: confirm used to execute the PREVIEWED plan, built on a census up to
+                // 5.5 s old, and then act on it for minutes. Re-plan instead — it costs one BuildPlan
+                // and it is the difference between executing the base as it is and as it was.
+                var fresh = Organizer.BuildPlan(chest, Plugin.SorterRadius.Value);
+                if (fresh.IsEmpty)
+                {
+                    Msg("Nothing left to organize");
+                    return;
+                }
+                Organizer.Execute(fresh);
                 return;
             }
 
@@ -314,8 +338,13 @@ namespace ChestButler.Patches
             if (_organizeLabel != null) _organizeLabel.text = "Confirm?";   // unmissable, unlike the fading Msg
             Plugin.Log.LogInfo("[organize] plan ready: " + s.TotalItems + " items -> " + s.TargetChests +
                 " chest(s) from " + s.SourceChests + " source(s); awaiting confirm");
-            Msg("Organize: move " + s.TotalItems + " item" + (s.TotalItems == 1 ? "" : "s") +
-                " across " + s.TargetChests + " chest" + (s.TargetChests == 1 ? "" : "s") + " - press again to confirm");
+            string preview = "Organize: move " + s.TotalItems + " item" + (s.TotalItems == 1 ? "" : "s") +
+                " across " + s.TargetChests + " chest" + (s.TargetChests == 1 ? "" : "s");
+            // v2 plan §4 step 5 / §8: an under-provisioned base is a normal outcome, not an error, and
+            // the player needs to hear about it BEFORE confirming rather than after.
+            if (s.HomelessItems > 0)
+                preview += " (" + s.HomelessItems + " won't fit - add more chests)";
+            Msg(preview + " - press again to confirm");
         }
 
         private static void ClearPending()
@@ -342,11 +371,20 @@ namespace ChestButler.Patches
             if (showPin)
             {
                 int n = Filters.GetPinned(_current).Count;
-                _pinLabel.text = n == 0 ? "Pin"
-                    : Filters.GetManual(_current) ? "Manual (" + n + ")" : "Auto (" + n + ")";
-                showClear = n > 0;
+                bool manual = Filters.GetManual(_current);
+                var spec = Filters.GetSpec(_current);
+
+                // W1 (§15.10): the Manual state is now visible with zero pins, so an empty chest can be
+                // opted out of the allocator and can be seen to be opted out.
+                _pinLabel.text = n == 0
+                    ? (manual ? "Manual" : "Pin")
+                    : (manual ? "Manual (" + n + ")" : "Auto (" + n + ")");
+
+                // Clear appears whenever there is something to clear — including a home the allocator
+                // claimed on a chest that has no pins of its own (v2 plan §4.1).
+                showClear = n > 0 || manual || !string.IsNullOrEmpty(spec.Home);
                 if (showClear) _clearLabel.text = "Clear";
-                showPull = Filters.GetSpec(_current).HasExplicit;
+                showPull = spec.HasExplicit;
                 if (showPull) _pullLabel.text = "Pull";
             }
 

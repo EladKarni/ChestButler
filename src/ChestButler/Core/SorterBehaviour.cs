@@ -30,7 +30,9 @@ namespace ChestButler.Core
         private void FixedUpdate()
         {
             if (Time.time < _nextTick) return;
-            _nextTick = Time.time + Plugin.TransferInterval.Value;
+            // W1 (v2 plan §16.6): the interval is the CONFIGURED value stretched by however much the
+            // mod is currently over its own cost budget. Config is a ceiling, never a floor.
+            _nextTick = Time.time + Throttle.TransferInterval(Plugin.TransferInterval.Value);
 
             // Routing is evaluated from the LOCAL player's point of view: both the per-container
             // access check and the ward check need Player.m_localPlayer. On a dedicated server that
@@ -47,9 +49,14 @@ namespace ChestButler.Core
             var inv = _container.GetInventory();
             if (inv == null) return;
 
+            // W1 (§16.6): time our own work so the throttle has a signal to act on. This is the second
+            // of the two hot paths it measures (the other is Organizer's plan/run).
+            using (Throttle.Measure())
+            {
             var block = InventoryBlock.Get(inv);
             int budget = Plugin.StacksPerTick.Value;
             float now = Time.time;
+            float missCooldown = Throttle.MissCooldown(MissCooldown);
 
             var snapshot = new List<ItemDrop.ItemData>(inv.GetAllItems());
             foreach (var item in snapshot)
@@ -63,7 +70,7 @@ namespace ChestButler.Core
                 var norm = Names.Normalize(item.m_shared.m_name);
                 if (norm.Length > 0 && _misses.TryGetValue(norm, out var missedAt))
                 {
-                    if (now - missedAt < MissCooldown) continue;
+                    if (now - missedAt < missCooldown) continue;
                     _misses.Remove(norm);
                 }
 
@@ -80,6 +87,7 @@ namespace ChestButler.Core
 
                 budget--;
                 Plugin.Log.LogDebug($"[sorter] routed {item.m_shared.m_name} x{amount}");
+            }
             }
         }
     }

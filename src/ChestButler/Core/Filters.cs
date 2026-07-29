@@ -11,6 +11,11 @@ namespace ChestButler.Core
         internal bool Ignore;
         internal bool ManualOnly;   // pull-only buffer: sorter never auto-fills it
 
+        /// <summary>The bucket this chest was claimed as a home for by a previous Organize v2 run
+        /// (the <c>psort_home</c> ZDO key), or null. Cached alongside the rest of the spec so a plan
+        /// costs one ZDO read per chest rather than two. v2 plan §4.1.</summary>
+        internal string Home;
+
         internal bool HasExplicit => Items.Count > 0 || GroupNames.Count > 0;
 
         internal bool MatchesItem(string normName)
@@ -44,6 +49,13 @@ namespace ChestButler.Core
         private const float CacheTtl = 30f;
         private static readonly int ItemsHash = "psort_items".GetStableHashCode();
         private static readonly int ManualHash = "psort_manual".GetStableHashCode();
+
+        /// <summary>W1 (Organize v2, plan §4.1/§16.1): the bucket key a chest was claimed as a home
+        /// for. Without this the allocator has no fixed point — §4 step 4 asks for an EMPTY chest to
+        /// claim, run 1 makes its own claimed chests non-empty, so run 2 claims a different empty
+        /// chest and relocates the whole spill. A bucket with no other anchor moves 100% of itself on
+        /// every press, forever. Same storage pattern as psort_items / psort_manual.</summary>
+        private static readonly int HomeHash = "psort_home".GetStableHashCode();
 
         private static readonly HashSet<Sign> Signs = new HashSet<Sign>();
         private static readonly Dictionary<Container, KeyValuePair<float, FilterSpec>> Cache =
@@ -117,6 +129,32 @@ namespace ChestButler.Core
             Cache.Remove(c);
         }
 
+        // ---------- claimed bucket home (ZDO) — Organize v2, plan §4.1 ----------
+
+        /// <summary>The bucket key this chest was claimed as a home for, or null.</summary>
+        internal static string GetHome(Container c)
+        {
+            var nv = SorterZdo.NView(c);
+            if (nv == null || !nv.IsValid()) return null;
+            var v = nv.GetZDO().GetString(HomeHash, "");
+            return string.IsNullOrEmpty(v) ? null : v;
+        }
+
+        /// <summary>Record that the allocator claimed this chest as <paramref name="bucketKey"/>'s
+        /// home. Pass null to clear. Written only for chests the allocator claims ITSELF — pin-, sign-
+        /// and station-derived anchors re-derive every run, and marking them would freeze a station
+        /// chest's role even after the station is torn down (v2 plan §4.1).</summary>
+        internal static void SetHome(Container c, string bucketKey)
+        {
+            var nv = SorterZdo.NView(c);
+            if (nv == null || !nv.IsValid()) return;
+            if (!nv.IsOwner()) nv.ClaimOwnership();
+            nv.GetZDO().Set(HomeHash, bucketKey ?? "");
+            Cache.Remove(c);
+        }
+
+        internal static void ClearHome(Container c) => SetHome(c, null);
+
         // ---------- combined spec (pinned + signs), cached ----------
 
         internal static FilterSpec GetSpec(Container c)
@@ -127,6 +165,7 @@ namespace ChestButler.Core
             var spec = new FilterSpec();
             foreach (var pin in GetPinned(c)) spec.Items.Add(pin);
             spec.ManualOnly = GetManual(c);
+            spec.Home = GetHome(c);
             ParseNearestSign(c, spec);
 
             Cache[c] = new KeyValuePair<float, FilterSpec>(Time.time, spec);
