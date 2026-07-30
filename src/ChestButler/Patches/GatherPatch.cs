@@ -232,6 +232,12 @@ namespace ChestButler.Patches
             _gatherBtn.interactable = anything;
             if (_gatherLabel != null)
                 _gatherLabel.text = anything ? "Gather (" + total + ")" : "Gather";
+
+            // W4: Gather sits directly above the Craft button, so that is the natural D-pad route into
+            // it. Core/GamepadNav.cs explains why this is navigation rather than a UIGamePad key.
+            var gui = InventoryGui.instance;
+            if (gui != null && gui.m_craftButton != null && _gatherBtn.gameObject.activeInHierarchy)
+                GamepadNav.LinkVertical(_gatherBtn, gui.m_craftButton, onlyIfVanillaEmpty: false);
         }
 
         private static void OnGatherClick()
