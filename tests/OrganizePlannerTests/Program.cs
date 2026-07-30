@@ -648,6 +648,72 @@ internal static class Program
             Check(pass3.Moves.Count == 0, "and stays settled on the third");
         }
 
+        // 20) W2 — Gather shortfall arithmetic (docs/gather-plan.md §7).
+        Console.WriteLine("[20] Gather: shortfall, craft multiplier, require-only-one");
+        {
+            Func<string, int, int, int, GatherNeed> N = (name, needed, inPlayer, inStorage) =>
+                new GatherNeed { SharedName = name, Needed = needed, InPlayer = inPlayer, InStorage = inStorage };
+
+            // Basic shortfall and the storage cap.
+            var wood = N("$item_wood", 20, 5, 100);
+            Check(wood.Shortfall == 15, "shortfall is needed minus what you carry");
+            Check(wood.Gatherable == 15, "storage covers it fully");
+
+            var scarce = N("$item_iron", 20, 5, 4);
+            Check(scarce.Shortfall == 15 && scarce.Gatherable == 4, "gatherable is capped by storage");
+
+            var plenty = N("$item_stone", 10, 30, 500);
+            Check(plenty.Shortfall == 0 && plenty.Gatherable == 0, "already carrying enough -> nothing to fetch");
+
+            var none = N("$item_tin", 10, 0, 0);
+            Check(none.Gatherable == 0, "nothing in storage -> nothing to fetch");
+
+            // Needed already folds in the craft multiplier at capture time; check the maths downstream
+            // of a x5 craft: 3 per craft x5 = 15, carrying 4, so 11 short.
+            var multi = N("$item_leather", 3 * 5, 4, 99);
+            Check(multi.Shortfall == 11, "craft multiplier is reflected in the shortfall");
+
+            // Normal recipe: every short ingredient storage can help with is returned.
+            var normal = new List<GatherNeed> { wood, scarce, plenty, none };
+            var rNormal = GatherMath.Resolve(normal, false);
+            Check(rNormal.Count == 2, "a normal recipe gathers every coverable ingredient");
+            Check(rNormal[0].SharedName == "$item_wood" && rNormal[1].SharedName == "$item_iron",
+                "and keeps them in the panel's order");
+
+            // require-only-one: exactly one ingredient, the one storage brings closest to done.
+            var onlyOne = new List<GatherNeed>
+            {
+                N("$item_bronze", 10, 0, 3),    // still 7 short after gathering
+                N("$item_iron",   10, 0, 9),    // only 1 short after gathering  <- best
+                N("$item_silver", 10, 0, 1),    // 9 short
+            };
+            var rOne = GatherMath.Resolve(onlyOne, true);
+            Check(rOne.Count == 1, "require-only-one fetches exactly one ingredient, not all three");
+            Check(rOne[0].SharedName == "$item_iron", "and picks the one storage nearly satisfies");
+
+            // If the player can already make it with something they carry, fetch nothing at all.
+            var satisfied = new List<GatherNeed>
+            {
+                N("$item_bronze", 10, 0, 100),
+                N("$item_iron",   10, 10, 100),   // already covered
+            };
+            Check(GatherMath.Resolve(satisfied, true).Count == 0,
+                "require-only-one with an option already in hand gathers nothing");
+
+            // Deterministic tie-break so the choice does not flicker between panel openings.
+            var tie = new List<GatherNeed>
+            {
+                N("$item_zzz", 10, 0, 5),
+                N("$item_aaa", 10, 0, 5),
+            };
+            var rTie = GatherMath.Resolve(tie, true);
+            Check(rTie.Count == 1 && rTie[0].SharedName == "$item_aaa",
+                "equal options resolve on name, stably");
+
+            Check(GatherMath.Resolve(null, false).Count == 0, "null input is safe");
+            Check(GatherMath.Resolve(new List<GatherNeed>(), true).Count == 0, "empty input is safe");
+        }
+
         Console.WriteLine("================================");
         Console.WriteLine($"RESULT: {_passed} passed, {_failed} failed");
         return _failed == 0 ? 0 : 1;
