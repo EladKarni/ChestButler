@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using HarmonyLib;
 using ChestButler.Core;
 using TMPro;
@@ -396,6 +397,27 @@ namespace ChestButler.Patches
             _clearBtn.gameObject.SetActive(showClear);
             _pullBtn.gameObject.SetActive(showPull);
             _organizeBtn.gameObject.SetActive(isSorter);
+
+            // W4: rebuild the controller navigation chain AFTER visibility settles. Explicit navigation
+            // into a hidden button dead-ends, and which buttons are shown depends on the chest.
+            LinkGamepadNav();
+        }
+
+        /// <summary>W4 — make the toolbar reachable on a controller. See Core/GamepadNav.cs for why this
+        /// is navigation links rather than the UIGamePad key bindings the roadmap first proposed.</summary>
+        private static void LinkGamepadNav()
+        {
+            if (_bar == null) return;
+            var row = new List<Selectable>
+            {
+                _sorterBtn, _pinBtn, _clearBtn, _pullBtn, _organizeBtn,
+            };
+            GamepadNav.LinkRow(row);
+
+            // Take All sits above the toolbar and is the natural way in from the vanilla panel.
+            var gui = InventoryGui.instance;
+            if (gui != null && gui.m_takeAllButton != null)
+                GamepadNav.AttachRowToAnchor(gui.m_takeAllButton, row);
         }
 
         private static void Msg(string text)
