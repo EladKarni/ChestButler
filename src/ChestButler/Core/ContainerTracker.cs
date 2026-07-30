@@ -29,16 +29,33 @@ namespace ChestButler.Core
         /// a symmetric storage hall is the normal build — swapped ranks between sessions and the
         /// "stable tie-break" the Organize planner documents was not actually happening.</summary>
         internal static List<Container> Candidates(Container sorter, float radius, bool excludeSorters = true)
+            => Accessible(sorter.transform.position, radius, sorter, excludeSorters);
+
+        /// <summary>W2 (Gather): the same accessibility query centred on an arbitrary POINT rather than
+        /// on a chest.
+        ///
+        /// Every existing query measures from a Container and excludes that Container from its own
+        /// results, which is right for a sorter pushing items outward but wrong for Gather, whose
+        /// origin is the player. Passing the nearest chest as a stand-in would centre the radius on the
+        /// wrong point and then drop that chest from the results.
+        ///
+        /// Deliberately a thin call into the same private core as <see cref="Candidates"/> rather than
+        /// a second copy of the filter chain: that chain is on the sorter tick path and is load-bearing
+        /// for Organize, and two copies drifting apart about what "accessible" means is a worse outcome
+        /// than one shared implementation.</summary>
+        internal static List<Container> AccessibleNear(Vector3 point, float radius, bool excludeSorters = false)
+            => Accessible(point, radius, null, excludeSorters);
+
+        private static List<Container> Accessible(Vector3 pos, float radius, Container exclude, bool excludeSorters)
         {
             All.RemoveWhere(c => c == null);
 
-            var pos = sorter.transform.position;
             var dists = new List<float>();
             var found = new List<Container>();
 
             foreach (var c in All)
             {
-                if (c == sorter) continue;
+                if (c == exclude) continue;
                 if (!SorterZdo.HasValidNView(c)) continue;
                 if (c.GetInventory() == null) continue;
                 if (c.GetComponentInParent<Piece>() == null) continue;   // player-built only

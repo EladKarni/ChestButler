@@ -24,6 +24,9 @@
          §16.4.3 asks for a test on. Both are deliberately Unity-free and config-free. -->
     <Compile Include="../../src/ChestButler/Core/BucketKeys.cs" Link="BucketKeys.cs" />
     <Compile Include="../../src/ChestButler/Core/GroupTables.cs" Link="GroupTables.cs" />
+    <!-- W2: Gather's shortfall arithmetic. The button and the MUC pull need a game; this does not,
+         and it is where the off-by-one bugs live. -->
+    <Compile Include="../../src/ChestButler/Core/GatherMath.cs" Link="GatherMath.cs" />
   </ItemGroup>
 
 </Project>
