@@ -151,9 +151,16 @@ namespace ChestButler.Patches
             }
             if (text == null) return;
 
-            const string marker = "  <color=#9BE07A>(";
+            const string marker = "  <color=#9BE07A>";
             if (text.text != null && text.text.Contains(marker)) return;   // already annotated this frame
-            text.text += marker + inStorage + " stored)</color>";
+
+            // The vanilla res_amount rect is sized for a two-digit number. With word wrap on, anything
+            // we append spills onto a second line the rect is too short to show — in-game that rendered
+            // as a bare "(25" with the rest cut off. Render on one line and let it overflow the rect,
+            // and keep the suffix short so it does not run into the neighbouring requirement slot.
+            text.textWrappingMode = TextWrappingModes.NoWrap;
+            text.overflowMode = TextOverflowModes.Overflow;
+            text.text += marker + "<size=85%>(" + inStorage + ")</size></color>";
         }
 
         // ---- the button ---------------------------------------------------------------------------
@@ -201,8 +208,9 @@ namespace ChestButler.Patches
             rt.anchorMax = srcRt.anchorMax;
             rt.pivot = srcRt.pivot;
             rt.sizeDelta = srcRt.sizeDelta;
-            // Directly above the Craft button, one height plus a small gap.
-            rt.anchoredPosition = srcRt.anchoredPosition + new Vector2(0f, srcRt.rect.height + 6f);
+            // Directly BELOW the Craft button, one height plus a small gap. Above it would overlap the
+            // requirement row that SetupRequirement draws under the item description.
+            rt.anchoredPosition = srcRt.anchoredPosition - new Vector2(0f, srcRt.rect.height + 6f);
 
             _gatherLabel = btn.GetComponentInChildren<TMP_Text>();
             if (_gatherLabel != null)
@@ -233,11 +241,13 @@ namespace ChestButler.Patches
             if (_gatherLabel != null)
                 _gatherLabel.text = anything ? "Gather (" + total + ")" : "Gather";
 
-            // W4: Gather sits directly above the Craft button, so that is the natural D-pad route into
+            // W4: Gather sits directly BELOW the Craft button, so D-pad down off Craft is the route into
             // it. Core/GamepadNav.cs explains why this is navigation rather than a UIGamePad key.
+            // Craft is the 'above' argument now; its downward edge is the one we claim (vanilla leaves
+            // it empty - Craft is the bottom control - so this costs no vanilla navigation).
             var gui = InventoryGui.instance;
             if (gui != null && gui.m_craftButton != null && _gatherBtn.gameObject.activeInHierarchy)
-                GamepadNav.LinkVertical(_gatherBtn, gui.m_craftButton, onlyIfVanillaEmpty: false);
+                GamepadNav.LinkVertical(gui.m_craftButton, _gatherBtn, onlyIfVanillaEmpty: false);
         }
 
         private static void OnGatherClick()
