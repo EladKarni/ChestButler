@@ -15,6 +15,9 @@
 
   <ItemGroup>
     <Compile Include="Program.cs" />
+    <!-- Convergence fuzz: 300 fixed-seed randomized bases; the permanent home of the harness that
+         caught the 2.0 cycle's two real regressions before any hand-written section did. -->
+    <Compile Include="ConvergenceFuzz.cs" />
     <Compile Include="../../src/ChestButler/Core/OrganizePlanner.cs" Link="OrganizePlanner.cs" />
     <!-- Names is the other genuinely Unity-free file: pure string matching, and 1.1.2 rewrote it
          (ordinal comparisons + cached token parsing), so it needs a regression net. -->

@@ -58,15 +58,25 @@ internal static class Program
         => new Dictionary<string, AnchorKind> { { bucket, kind } };
 
     private static PlannerInput In(List<ChestView> chests, int maxStack = 50, int miscPromote = 24,
-        Dictionary<string, int> maxStackOf = null)
+        Dictionary<string, int> maxStackOf = null, Func<string, int> rank = null)
         => new PlannerInput
         {
             Chests = chests,
             MaxStackOf = n => maxStackOf != null && maxStackOf.TryGetValue(n, out var v) ? v : maxStack,
-            BucketRank = _ => 0,
+            BucketRank = rank ?? (_ => 0),
             DistanceBetween = (a, b) => Math.Abs(chests[a].Distance - chests[b].Distance),
             MiscPromoteSlots = miscPromote,
         };
+
+    /// <summary>`count` one-of-a-kind unstackable weapons (distinct norms, 1 slot each), plus any
+    /// extra stacks — the standard way to build a bucket whose demand is exactly `count` slots.</summary>
+    private static Stack[] Gear(int from, int count, params Stack[] extra)
+    {
+        var list = new List<Stack>(extra);
+        for (int i = 0; i < count; i++)
+            list.Add(S("weapon" + (from + i).ToString("000"), 1, BucketKeys.Weapons, stackable: false));
+        return list.ToArray();
+    }
 
     // ---- assertions ------------------------------------------------------------------------------
 
@@ -107,7 +117,7 @@ internal static class Program
     /// <summary>Apply a plan to the census so the next run sees the world the plan intended — the only
     /// honest way to test re-run stability. Also applies the psort_home markers, because those are
     /// exactly what makes run 2 recognise run 1's claims (v2 plan §4.1).</summary>
-    private static void Apply(List<ChestView> chests, PlannerResult plan, bool applyHomes = true)
+    internal static void Apply(List<ChestView> chests, PlannerResult plan, bool applyHomes = true)
     {
         // Snapshot each stack identity's bucket/stackability BEFORE mutating anything: a move can
         // empty its source stack, and reading the prototype afterwards would lose the bucket key.
@@ -159,12 +169,42 @@ internal static class Program
 
         foreach (var hm in plan.HomeMarks)
         {
-            chests[hm.ChestId].HomeMarker = hm.BucketKey;
-            if (hm.BucketKey == null) continue;
             var c = chests[hm.ChestId];
-            if (c.Anchors == null) c.Anchors = new Dictionary<string, AnchorKind>();
+            c.HomeMarker = hm.BucketKey;
+            if (hm.BucketKey == null)
+            {
+                // A cleared psort_home also stops being a Home anchor next run — the adapter derives
+                // the anchor FROM the marker, so the two must move together or the fuzz lies.
+                if (c.Anchors != null)
+                {
+                    var drop = new List<string>();
+                    foreach (var kv in c.Anchors) if (kv.Value == AnchorKind.Home) drop.Add(kv.Key);
+                    foreach (var k in drop) c.Anchors.Remove(k);
+                    if (c.Anchors.Count == 0) c.Anchors = null;
+                }
+                continue;
+            }
+            if (c.Anchors == null) c.Anchors = new Dictionary<string, AnchorKind>(StringComparer.Ordinal);
             c.Anchors[hm.BucketKey] = AnchorKind.Home;
         }
+    }
+
+    /// <summary>Per-norm item totals across every chest — the conservation invariant's currency.</summary>
+    internal static Dictionary<string, int> Totals(List<ChestView> chests)
+    {
+        var t = new Dictionary<string, int>(StringComparer.Ordinal);
+        foreach (var c in chests)
+            foreach (var s in c.Stacks)
+                t[s.Norm] = (t.TryGetValue(s.Norm, out var v) ? v : 0) + s.Count;
+        return t;
+    }
+
+    internal static bool SameTotals(Dictionary<string, int> a, Dictionary<string, int> b)
+    {
+        if (a.Count != b.Count) return false;
+        foreach (var kv in a)
+            if (!b.TryGetValue(kv.Key, out var v) || v != kv.Value) return false;
+        return true;
     }
 
     private static int Main()
@@ -309,12 +349,15 @@ internal static class Program
                 Chest(0, new[] { S("wood", 500, "wood") }, totalSlots: 4),
                 Chest(1, totalSlots: 2, anchors: Anchor("wood", AnchorKind.Sign)),
             };
+            var before = Totals(chests);
             var r = OrganizePlanner.Plan(In(chests));
-            int placed = 0;
-            foreach (var m in r.Moves) placed += m.Amount;
             // Capacity is 4 + 2 = 6 slots = 300 items; the rest stays put and is reported.
             Check(r.Summary.HomelessItems == 200, "200 items reported as having no room");
-            Check(placed + 300 - TotalFrom(r.Moves, 0) + TotalFrom(r.Moves, 0) >= placed, "no item invented");
+            // Real conservation: apply the plan and compare per-norm totals across ALL chests.
+            // Fails if DistributeAndDiff ever double-counts, invents or destroys an item.
+            Apply(chests, r);
+            Check(SameTotals(before, Totals(chests)),
+                "conservation: per-norm totals identical after applying the plan");
             Check(r.Summary.HomelessItems + 300 == 500, "every item is either placed or reported");
         }
 
@@ -713,6 +756,335 @@ internal static class Program
             Check(GatherMath.Resolve(null, false).Count == 0, "null input is safe");
             Check(GatherMath.Resolve(new List<GatherNeed>(), true).Count == 0, "empty input is safe");
         }
+
+        // 21) KILLS M13 — the reinstated free-pool veto (the shipped bug f628bed fixed): a chest
+        //     anchored for a LIVE low-demand bucket holds the only remaining capacity. Its surplus
+        //     must be usable as a last resort, not fenced off wholesale.
+        Console.WriteLine("[21] a live station chest's surplus is a last resort, never fenced off");
+        {
+            var chests = new List<ChestView>
+            {
+                Chest(0, new[] { S("wood", 50, "wood") }, totalSlots: 24, distance: 1f,
+                      anchors: Anchor("wood", AnchorKind.Station)),
+                Chest(1, Gear(0, 24), totalSlots: 24, distance: 2f),
+                Chest(2, Gear(24, 6), totalSlots: 24, distance: 3f, excludedTarget: true),
+            };
+            var r = OrganizePlanner.Plan(In(chests));
+            Check(r.Summary.HomelessItems == 0,
+                "zero homeless: the 6 spare weapons use the station chest's idle slots (M13 fences them off)");
+            Check(TotalTo(r.Moves, 0) > 0, "the station chest's surplus is actually used");
+            Check(TotalFrom(r.Moves, 0) == 0, "the wood is not evicted from its own station chest");
+        }
+
+        // 22) KILLS M14 — vetoing ANY already-reserved chest. A realistic multi-bucket base where
+        //     co-tenancy is REQUIRED: total demand (30 slots) exactly equals total capacity, so
+        //     later buckets must share partially-reserved chests. Hand-computed expectation: 0.
+        Console.WriteLine("[22] six buckets share tight capacity via co-tenancy (M14 starves four of them)");
+        {
+            var chests = new List<ChestView>
+            {
+                Chest(0, new[]
+                {
+                    S("wood", 600, "wood"),        // 12 slots
+                    S("deerhide", 350, "hides"),   //  7
+                    S("iron", 200, "metals"),      //  4
+                    S("carrot", 150, "cooking"),   //  3
+                    S("rawmeat", 100, "meat"),     //  2
+                    S("seeds", 100, "seeds"),      //  2  -> 30 slots total demand
+                }, totalSlots: 30, distance: 0.1f, excludedTarget: true),
+                Chest(1, totalSlots: 10, distance: 1f, anchors: Anchor("metals", AnchorKind.Station)),
+                Chest(2, totalSlots: 10, distance: 2f, anchors: Anchor("cooking", AnchorKind.Sign)),
+                Chest(3, totalSlots: 10, distance: 3f),
+            };
+            var before = Totals(chests);
+            var r = OrganizePlanner.Plan(In(chests));
+            Check(r.Summary.HomelessItems == 0,
+                "30 slots of demand fit exactly into 30 slots of capacity (M14 reports 650 homeless)");
+            Check(TotalTo(r.Moves, 1, "iron") == 200, "the metals go to their station chest");
+            Check(TotalTo(r.Moves, 2, "carrot") == 150, "the cooking goes to its sign chest");
+            Apply(chests, r);
+            Check(SameTotals(before, Totals(chests)), "conservation holds across the whole shuffle");
+        }
+
+        // 23) KILLS M11 — Claimed = true unconditionally. When bucket B co-tenants into a chest that
+        //     is bucket A's STATION anchor, no psort_home may be written there: that marker would make
+        //     the chest AnchorKind.Home for B next run and push A out of its own chest.
+        Console.WriteLine("[23] marker exactness: co-tenancy writes NO psort_home on a foreign chest");
+        {
+            var chests = new List<ChestView>
+            {
+                Chest(0, new[] { S("wood", 50, "wood") }, totalSlots: 24, distance: 1f,
+                      anchors: Anchor("wood", AnchorKind.Station)),
+                Chest(1, Gear(0, 24), totalSlots: 24, distance: 2f),
+                Chest(2, Gear(24, 6), totalSlots: 24, distance: 3f, excludedTarget: true),
+            };
+            var r = OrganizePlanner.Plan(In(chests));
+            // weapons claim chest 1 outright (marker earned) and co-tenant into chest 0 (no marker).
+            Check(r.HomeMarks.Count == 1, "exactly ONE psort_home write in the whole plan");
+            Check(r.HomeMarks.Count == 1 && r.HomeMarks[0].ChestId == 1
+                  && r.HomeMarks[0].BucketKey == BucketKeys.Weapons,
+                "and it is the weapons' own claimed chest - never the co-tenanted station chest");
+        }
+
+        // 24) KILLS M09 — dropping the `kind < AnchorKind.Station` skip. A psort_home Home anchor is
+        //     a phase-2 memo, never a phase-1 instruction: the Station bucket gets the chest's slots
+        //     in phase 1 even when the Home bucket has LARGER demand and would otherwise run first.
+        Console.WriteLine("[24] phase-1 gating: a Home anchor never outruns a Station anchor");
+        {
+            var chests = new List<ChestView>
+            {
+                Chest(0, totalSlots: 4, distance: 1f, home: "wood",
+                      anchors: new Dictionary<string, AnchorKind>
+                      { { "metals", AnchorKind.Station }, { "wood", AnchorKind.Home } }),
+                Chest(1, totalSlots: 24, distance: 2f),
+                Chest(2, new[] { S("wood", 300, "wood"), S("iron", 200, "metals") },
+                      totalSlots: 24, distance: 0.1f, excludedTarget: true),
+            };
+            var r = OrganizePlanner.Plan(In(chests));
+            Check(TotalTo(r.Moves, 0, "iron") == 200,
+                "the station bucket gets its chest in phase 1 (M09 lets the bigger Home bucket steal it)");
+            Check(TotalTo(r.Moves, 0, "wood") == 0, "no wood lands in the station chest");
+            Check(TotalTo(r.Moves, 1, "wood") == 300, "the Home bucket tops up from the free pool in phase 2");
+        }
+
+        // 25) KILLS M30 — CompareAnchors ignoring AnchorKind. One bucket with Pin, Sign, Station and
+        //     Home chests and demand for only 6 of the 12 phase-1 slots: the fill order must be
+        //     Pin > Sign > Station > Home even though distance ranks them exactly the other way.
+        Console.WriteLine("[25] anchor strength IS the fill order: Pin > Sign > Station > Home");
+        {
+            var chests = new List<ChestView>
+            {
+                Chest(0, new[] { S("wood", 300, "wood") }, totalSlots: 24, distance: 5f,
+                      excludedTarget: true),
+                Chest(1, totalSlots: 4, distance: 1f, anchors: Anchor("wood", AnchorKind.Station)),
+                Chest(2, totalSlots: 4, distance: 2f, anchors: Anchor("wood", AnchorKind.Sign)),
+                Chest(3, totalSlots: 4, distance: 3f, anchors: Anchor("wood", AnchorKind.Pin)),
+                Chest(4, totalSlots: 4, distance: 0.5f, home: "wood",
+                      anchors: Anchor("wood", AnchorKind.Home)),
+            };
+            var r = OrganizePlanner.Plan(In(chests));
+            Check(TotalTo(r.Moves, 3) == 200, "the PINNED chest fills first (200 of 300)");
+            Check(TotalTo(r.Moves, 2) == 100, "the SIGN chest takes the remainder");
+            Check(TotalTo(r.Moves, 1) == 0, "the nearer station chest gets nothing");
+            Check(TotalTo(r.Moves, 4) == 0, "the nearest Home chest gets nothing - Home is weakest");
+        }
+
+        // 26) KILLS M04 / M15 / M05 — the free-pick preference chain, one key per assertion.
+        Console.WriteLine("[26] free-chest preference: wholly-empty, then nearest, then uid");
+        {
+            // (a) WHOLLY-empty beats immovable-cluttered, even when the cluttered chest is nearer.
+            //     M04 prefers the cluttered one outright; M15 calls both 'empty' and lets distance pick
+            //     the cluttered one. Real bug: sorted items wedged between someone's locked stacks.
+            var a = new List<ChestView>
+            {
+                Chest(0, new[] { S("wood", 100, "wood") }, totalSlots: 24, distance: 0.1f,
+                      excludedTarget: true),
+                Chest(1, new[] { S("junk1", 10, null), S("junk2", 10, null), S("junk3", 10, null),
+                                 S("junk4", 10, null) }, totalSlots: 24, distance: 1f),
+                Chest(2, totalSlots: 24, distance: 2f),
+            };
+            var ra = OrganizePlanner.Plan(In(a));
+            Check(TotalTo(ra.Moves, 2) == 100 && TotalTo(ra.Moves, 1) == 0,
+                "the wholly-empty chest wins over the nearer immovable-cluttered one (M04/M15)");
+
+            // (b) nearest beats farthest at equal emptiness — M05 reverses the comparison. The uids
+            //     oppose the distances so a uid-first picker cannot pass by accident.
+            var b = new List<ChestView>
+            {
+                Chest(0, new[] { S("wood", 100, "wood") }, totalSlots: 24, distance: 0.1f,
+                      uid: "mmm", excludedTarget: true),
+                Chest(1, totalSlots: 24, distance: 1f, uid: "zzz"),
+                Chest(2, totalSlots: 24, distance: 5f, uid: "aaa"),
+            };
+            var rb = OrganizePlanner.Plan(In(b));
+            Check(TotalTo(rb.Moves, 1) == 100 && TotalTo(rb.Moves, 2) == 0,
+                "the nearest empty chest wins (M05 sends the wood across the base)");
+
+            // (c) at an exact tie, the lower ZDO uid wins - stable across sessions.
+            var c = new List<ChestView>
+            {
+                Chest(0, new[] { S("wood", 100, "wood") }, totalSlots: 24, distance: 0.1f,
+                      uid: "mmm", excludedTarget: true),
+                Chest(1, totalSlots: 24, distance: 3f, uid: "bbb"),
+                Chest(2, totalSlots: 24, distance: 3f, uid: "aaa"),
+            };
+            var rc = OrganizePlanner.Plan(In(c));
+            Check(TotalTo(rc.Moves, 2) == 100 && TotalTo(rc.Moves, 1) == 0,
+                "an exact distance tie resolves on uid: 'aaa' beats 'bbb'");
+        }
+
+        // 27) KILLS M10 / M22 / M20 — ledger honesty.
+        Console.WriteLine("[27] the slot ledger never over-promises and never over-reserves");
+        {
+            // (a) M10, the §16.4.2 over-reserve: a shared station chest serves two small buckets.
+            //     If the first taker grabs ALL its slots instead of min(slotsLeft, needed), the wood
+            //     is starved and 1100 items go homeless in a base that fits exactly.
+            var a = new List<ChestView>
+            {
+                Chest(0, totalSlots: 24, distance: 1f,
+                      anchors: new Dictionary<string, AnchorKind>
+                      { { "cooking", AnchorKind.Station }, { "meat", AnchorKind.Station } }),
+                Chest(1, totalSlots: 20, distance: 2f),
+                Chest(2, new[] { S("cookedmeat", 100, "cooking"), S("rawmeat", 100, "meat"),
+                                 S("wood", 2000, "wood") },
+                      totalSlots: 44, distance: 0.1f, excludedTarget: true),
+            };
+            var ra = OrganizePlanner.Plan(In(a));
+            Check(ra.Summary.HomelessItems == 0,
+                "44 slots of demand fit 44 slots of capacity - anchors take only what they need (M10)");
+
+            // (b) M22: immovable stacks permanently cost slots. 4-slot chest, 2 slots locked by
+            //     immovables -> the plan MUST report 100 homeless rather than promise room that
+            //     does not exist and let execution fail.
+            var b = new List<ChestView>
+            {
+                Chest(0, new[] { S("wood", 200, "wood") }, totalSlots: 4, distance: 0.1f,
+                      excludedTarget: true),
+                Chest(1, new[] { S("junk1", 10, null), S("junk2", 10, null) },
+                      totalSlots: 4, distance: 1f),
+            };
+            var rb = OrganizePlanner.Plan(In(b));
+            Check(rb.Summary.HomelessItems == 100,
+                "immovable stacks reduce capacity: 100 wood honestly reported homeless (M22 promises 0)");
+            Check(TotalTo(rb.Moves, 1) == 100, "and only the 2 genuinely free slots are filled");
+
+            // (c) M20, the CeilDiv boundary: counts exactly divisible by maxStack. (100+50)/50 = 3
+            //     slots instead of 2 makes the first bucket over-reserve the shared sign chest and
+            //     starve the second in a base that fits exactly.
+            var c = new List<ChestView>
+            {
+                Chest(0, new[] { S("wood", 100, "wood"), S("stone", 100, "stone") },
+                      totalSlots: 4, distance: 0.1f, excludedTarget: true),
+                Chest(1, totalSlots: 4, distance: 1f,
+                      anchors: new Dictionary<string, AnchorKind>
+                      { { "wood", AnchorKind.Sign }, { "stone", AnchorKind.Sign } }),
+            };
+            var rcd = OrganizePlanner.Plan(In(c));
+            Check(rcd.Summary.HomelessItems == 0,
+                "counts exactly divisible by maxStack cost exactly count/maxStack slots (M20 starves one bucket)");
+            Check(TotalTo(rcd.Moves, 1) == 200, "all 200 items land in the 4-slot sign chest");
+
+            // (d) the other CeilDiv boundary: a single item needs a whole slot, no less.
+            var d = new List<ChestView>
+            {
+                Chest(0, new[] { S("wood", 1, "wood") }, totalSlots: 4, distance: 0.1f,
+                      excludedTarget: true),
+                Chest(1, totalSlots: 1, distance: 1f, anchors: Anchor("wood", AnchorKind.Sign)),
+            };
+            var rd = OrganizePlanner.Plan(In(d));
+            Check(TotalTo(rd.Moves, 1) == 1 && rd.Summary.HomelessItems == 0,
+                "count=1 demands one slot and is placed");
+        }
+
+        // 28) KILLS M18 — dropping the dead-anchor filter. A stale psort_home for a bucket with ZERO
+        //     items must not stop a live bucket claiming the chest, and the run must overwrite the
+        //     stale marker with the live claimant's (which is how the stale value gets cleaned up).
+        Console.WriteLine("[28] dead-anchor hygiene: a stale psort_home neither reserves nor survives");
+        {
+            var chests = new List<ChestView>
+            {
+                Chest(0, new[] { S("wood", 1000, "wood") }, totalSlots: 24, distance: 0.1f,
+                      excludedTarget: true),
+                Chest(1, totalSlots: 24, distance: 1f, home: "meads",
+                      anchors: Anchor("meads", AnchorKind.Home)),   // no meads exist anywhere
+            };
+            var r = OrganizePlanner.Plan(In(chests));
+            Check(TotalTo(r.Moves, 1) == 1000, "the chest with the dead marker is claimed by the live bucket");
+            Check(r.HomeMarks.Count == 1 && r.HomeMarks[0].ChestId == 1
+                  && r.HomeMarks[0].BucketKey == "wood",
+                "the stale 'meads' marker is replaced by the claimant's own psort_home (M18 leaves no write)");
+        }
+
+        // 29) KILLS M24 — demand + 1 per bucket. A bucket whose demand exactly fills its anchor must
+        //     reserve exactly that and touch NO free chest: an off-by-one claim leaks a psort_home
+        //     marker onto a chest the bucket does not need.
+        Console.WriteLine("[29] demand exactness: an exact fit claims nothing extra");
+        {
+            var chests = new List<ChestView>
+            {
+                Chest(0, new[] { S("wood", 100, "wood") }, totalSlots: 4, distance: 0.1f,
+                      excludedTarget: true),
+                Chest(1, totalSlots: 2, distance: 1f, anchors: Anchor("wood", AnchorKind.Sign)),
+                Chest(2, totalSlots: 24, distance: 2f),
+            };
+            var r = OrganizePlanner.Plan(In(chests));
+            Check(TotalTo(r.Moves, 1) == 100 && r.Summary.HomelessItems == 0,
+                "100 wood (exactly 2 slots) fill the 2-slot anchor");
+            Check(TotalTo(r.Moves, 2) == 0, "the free chest receives nothing");
+            Check(r.HomeMarks.Count == 0,
+                "and is not claimed either - no psort_home anywhere (M24's +1 slot claims it)");
+        }
+
+        // 30) KILLS M27 — bucket order by string hash. Two parts, both deterministic in-process:
+        //     (a) the same logical base with every stack list reversed (which permutes the bucket
+        //         first-seen order) must produce the identical normalized plan;
+        //     (b) an equal-demand tie must resolve by BucketRank in BOTH directions - a hash-order
+        //         comparator picks the same winner regardless of rank, so it cannot pass both.
+        Console.WriteLine("[30] determinism: hash-order iteration cannot reproduce the bucket contract");
+        {
+            Func<bool, List<ChestView>> mk = reversed =>
+            {
+                var stacks0 = new List<Stack>
+                {
+                    S("wood", 90, "wood"), S("iron", 70, "metals"), S("carrot", 50, "cooking"),
+                    S("rawmeat", 30, "meat"), S("coal", 30, "fuel"),
+                };
+                var stacks1 = new List<Stack>
+                {
+                    S("stone", 90, "stone"), S("wood", 60, "wood"), S("deerhide", 40, "hides"),
+                };
+                if (reversed) { stacks0.Reverse(); stacks1.Reverse(); }
+                return new List<ChestView>
+                {
+                    Chest(0, stacks0.ToArray(), totalSlots: 24, distance: 1f),
+                    Chest(1, stacks1.ToArray(), totalSlots: 24, distance: 2f),
+                    Chest(2, totalSlots: 24, distance: 3f),
+                    Chest(3, totalSlots: 24, distance: 4f, anchors: Anchor("metals", AnchorKind.Station)),
+                };
+            };
+            Func<List<OrganizeMove>, List<string>> normalize = moves =>
+            {
+                var agg = new Dictionary<string, int>(StringComparer.Ordinal);
+                foreach (var m in moves)
+                {
+                    var key = m.SrcId + ">" + m.TgtId + ">" + m.Norm;
+                    agg[key] = (agg.TryGetValue(key, out var v) ? v : 0) + m.Amount;
+                }
+                var lines = new List<string>();
+                foreach (var kv in agg) lines.Add(kv.Key + "=" + kv.Value);
+                lines.Sort(StringComparer.Ordinal);
+                return lines;
+            };
+            var p = normalize(OrganizePlanner.Plan(In(mk(false))).Moves);
+            var q = normalize(OrganizePlanner.Plan(In(mk(true))).Moves);
+            bool same = p.Count == q.Count;
+            for (int i = 0; same && i < p.Count; i++) same = p[i] == q[i];
+            Check(same, "permuting stack order / bucket first-seen order changes nothing in the plan");
+
+            // (b) equal-demand tie: wood and stone both need 2 slots; the 2-slot chest 1 is nearer.
+            //     Whoever is allocated first gets it. BucketRank must decide - in both directions.
+            Func<List<ChestView>> tie = () => new List<ChestView>
+            {
+                Chest(0, new[] { S("wood", 100, "wood"), S("stone", 100, "stone") },
+                      totalSlots: 4, distance: 0.1f, excludedTarget: true),
+                Chest(1, totalSlots: 2, distance: 1f),
+                Chest(2, totalSlots: 24, distance: 2f),
+            };
+            var woodFirst = OrganizePlanner.Plan(In(tie(),
+                rank: bkt => bkt == "wood" ? 0 : 1));
+            Check(TotalTo(woodFirst.Moves, 1, "wood") == 100,
+                "rank wood<stone: wood wins the near 2-slot chest");
+            var stoneFirst = OrganizePlanner.Plan(In(tie(),
+                rank: bkt => bkt == "stone" ? 0 : 1));
+            Check(TotalTo(stoneFirst.Moves, 1, "stone") == 100,
+                "rank stone<wood: stone wins it instead - a hash order cannot pass both");
+        }
+
+        // 31) The convergence fuzz, promoted from the scratchpad harness that caught the only two
+        //     real regressions this week: 300 fixed-seed randomized bases; press 2 and press 3 must
+        //     move zero items, homeless must never grow, and items must be conserved throughout.
+        Console.WriteLine("[31] convergence fuzz: 300 randomized bases settle by press 2");
+        ConvergenceFuzz.Run(Check);
 
         Console.WriteLine("================================");
         Console.WriteLine($"RESULT: {_passed} passed, {_failed} failed");
