@@ -276,10 +276,31 @@ namespace ChestButler.Core
             var liveBuckets = new HashSet<string>(StringComparer.Ordinal);
             foreach (var b in buckets) if (demand[b] > 0) liveBuckets.Add(b);
 
+            // chest id -> the FIRST bucket that took slots in it this run. This is run 1's mirror of
+            // an AnchorKind.Home marker: the chest a bucket claims now is the chest that carries its
+            // psort_home next run, so "already somebody else's" has to mean the same thing on both
+            // runs or the free-chest preference flips between presses and the base never settles.
+            var reservedBy = new string[chests.Count];
+
             var homes = new Dictionary<string, List<Reservation>>(StringComparer.Ordinal);
+            var residual = new Dictionary<string, int>(StringComparer.Ordinal);
+
+            // PHASE 1 - every bucket takes the chests it was EXPLICITLY given (pin / sign / station).
+            // Settling all of those against the one shared ledger BEFORE anybody competes for
+            // leftovers is what makes "is this chest's spare capacity surplus?" a decidable question
+            // in phase 2. That is exactly the question the old free-pool veto could not answer, which
+            // is why it fenced off whole chests when it only had to protect a few slots.
             foreach (var bucket in buckets)
-                homes[bucket] = Allocate(bucket, demand[bucket], chests, slotsLeft,
-                                         distanceBetween, liveBuckets);
+            {
+                int needed = demand[bucket];
+                homes[bucket] = TakeAnchors(bucket, ref needed, chests, slotsLeft, reservedBy);
+                residual[bucket] = needed;
+            }
+
+            // PHASE 2 - psort_home memos and free chests, same bucket order, same ledger.
+            foreach (var bucket in buckets)
+                ClaimFree(bucket, residual[bucket], homes[bucket], chests, slotsLeft, reservedBy,
+                          distanceBetween, liveBuckets);
 
             // ---- 6. final distribution + diff ----------------------------------------------------
             var moves = result.Moves;
@@ -386,12 +407,11 @@ namespace ChestButler.Core
         /// 24-slot kitchen chest into three buckets and subtracted 24 slots from each, so nothing
         /// claimed a free chest and thousands of items were reported homeless while empty chests sat
         /// two rooms away. Slots are debited from ONE ledger, exactly once.</summary>
-        private static List<Reservation> Allocate(
-            string bucket, int needed,
+        private static List<Reservation> TakeAnchors(
+            string bucket, ref int needed,
             IReadOnlyList<ChestView> chests,
             int[] slotsLeft,
-            Func<int, int, float> distanceBetween,
-            HashSet<string> liveBuckets)
+            string[] reservedBy)
         {
             var taken = new List<Reservation>();
             if (needed <= 0) return taken;
@@ -404,6 +424,13 @@ namespace ChestButler.Core
                 if (c == null || c.ExcludedAsTarget) continue;
                 var kind = c.AnchorFor(bucket);
                 if (kind == AnchorKind.None) continue;
+
+                // A psort_home marker is NOT an instruction - it is a memo of what this allocator
+                // itself chose in PHASE 2 last run, so it is replayed in phase 2 (PickFreeChest's
+                // mine-first key), never promoted to phase 1. Promote it and it jumps ahead of
+                // another bucket's phase-2 claim on the same chest, and the two trade slots forever.
+                if (kind < AnchorKind.Station) continue;
+
                 anchors.Add(new Reservation
                 {
                     ChestId = i, Kind = kind, Priority = c.Priority,
@@ -421,30 +448,52 @@ namespace ChestButler.Core
                 needed -= take;
                 a.Slots = take;
                 taken.Add(a);
+                if (reservedBy[a.ChestId] == null) reservedBy[a.ChestId] = bucket;
             }
 
-            // -- claim free chests -----------------------------------------------------------------
-            // Reference point for "nearest": the bucket's own primary home if it has one, so a
-            // spilling category grows outward from its anchor rather than from the clicked sorter.
+            return taken;
+        }
+
+        /// <summary>PHASE 2. Top a bucket up from what is left once EVERY bucket has taken its
+        /// explicit anchors - its own psort_home chests first, then the free pool.
+        ///
+        /// Reference point for "nearest": the bucket's own primary home if it has one, so a spilling
+        /// category grows outward from its anchor rather than from the clicked sorter.</summary>
+        private static void ClaimFree(
+            string bucket, int needed,
+            List<Reservation> taken,
+            IReadOnlyList<ChestView> chests,
+            int[] slotsLeft,
+            string[] reservedBy,
+            Func<int, int, float> distanceBetween,
+            HashSet<string> liveBuckets)
+        {
             while (needed > 0)
             {
                 int refChest = taken.Count > 0 ? taken[0].ChestId : -1;
-                int pick = PickFreeChest(bucket, chests, slotsLeft, refChest, distanceBetween, liveBuckets);
+                int pick = PickFreeChest(bucket, chests, slotsLeft, reservedBy, refChest,
+                                         distanceBetween, liveBuckets);
                 if (pick < 0) break;                                  // free pool exhausted
 
                 int take = Math.Min(slotsLeft[pick], needed);
                 slotsLeft[pick] -= take;
                 needed -= take;
+                bool firstHere = reservedBy[pick] == null
+                                 || string.Equals(reservedBy[pick], bucket, StringComparison.Ordinal);
+                if (reservedBy[pick] == null) reservedBy[pick] = bucket;
                 var c = chests[pick];
                 taken.Add(new Reservation
                 {
                     ChestId = pick, Kind = AnchorKind.None, Priority = c.Priority,
                     Distance = c.Distance, UidKey = c.UidKey ?? "", Slots = take,
-                    Claimed = true,        // → gets a psort_home marker so run 2 finds it again
+                    // → gets a psort_home marker so run 2 finds it again. NOT when we are merely a
+                    // co-tenant of a chest that already belongs to somebody else: that marker would
+                    // make the chest AnchorKind.Home for US next run and push the owner out of its
+                    // own chest. A co-tenancy needs no marker - phase 2 re-derives it identically
+                    // every run from demand and geometry alone.
+                    Claimed = firstHere && !AnchorsAnotherLiveBucket(c, bucket, liveBuckets),
                 });
             }
-
-            return taken;
         }
 
         private static int CompareAnchors(Reservation a, Reservation b)
@@ -464,11 +513,14 @@ namespace ChestButler.Core
             string bucket,
             IReadOnlyList<ChestView> chests,
             int[] slotsLeft,
+            string[] reservedBy,
             int refChest,
             Func<int, int, float> distanceBetween,
             HashSet<string> liveBuckets)
         {
             int best = -1;
+            bool bestMine = false;
+            bool bestShared = false;
             bool bestEmpty = false;
             float bestDist = 0f;
             string bestUid = null;
@@ -479,26 +531,42 @@ namespace ChestButler.Core
                 var c = chests[i];
                 if (c == null || c.ExcludedAsTarget) continue;
 
-                // Never steal a chest that is another LIVE bucket's home — that bucket would then
-                // relocate on the next press and neither would ever settle. An anchor for a bucket
-                // with no items in the census is dead and its chest stays claimable (§16.4.6).
-                if (AnchorsAnotherLiveBucket(c, bucket, liveBuckets)) continue;
+                // My own psort_home chest from last run, re-picked by exactly the rule that picked
+                // it the first time. This is what keeps press 2 free: run 1's choice is REPLAYED
+                // here, never re-derived from a different ordering.
+                bool mine = c.AnchorFor(bucket) == AnchorKind.Home;
+
+                // Last resort, NOT a veto - the veto was the bug. Whatever is still free in this
+                // chest after phase 1 is capacity no live anchored bucket asked for: the anchor pass
+                // takes min(slotsLeft, needed), so a bucket with unmet demand drives every one of its
+                // anchor chests to zero. Taking the remainder therefore steals nothing, while ranking
+                // it last still keeps a station chest for its own buckets whenever anything else has
+                // room. An anchor for a bucket with no items in the census is dead and does not count
+                // as shared at all (§16.4.6).
+                bool shared = (reservedBy[i] != null
+                               && !string.Equals(reservedBy[i], bucket, StringComparison.Ordinal))
+                              || AnchorsAnotherLiveBucket(c, bucket, liveBuckets);
 
                 bool empty = slotsLeft[i] >= c.TotalSlots;
                 float dist = refChest >= 0 ? distanceBetween(refChest, i) : c.Distance;
                 string uid = c.UidKey ?? "";
 
-                if (best < 0 || Better(empty, dist, uid, bestEmpty, bestDist, bestUid))
+                if (best < 0 || Better(mine, shared, empty, dist, uid,
+                                       bestMine, bestShared, bestEmpty, bestDist, bestUid))
                 {
-                    best = i; bestEmpty = empty; bestDist = dist; bestUid = uid;
+                    best = i; bestMine = mine; bestShared = shared;
+                    bestEmpty = empty; bestDist = dist; bestUid = uid;
                 }
             }
             return best;
         }
 
-        private static bool Better(bool empty, float dist, string uid,
-                                   bool bestEmpty, float bestDist, string bestUid)
+        private static bool Better(bool mine, bool shared, bool empty, float dist, string uid,
+                                   bool bestMine, bool bestShared, bool bestEmpty, float bestDist,
+                                   string bestUid)
         {
+            if (mine != bestMine) return mine;              // my own claimed home wins outright
+            if (shared != bestShared) return !shared;       // then a chest nobody else is using
             if (empty != bestEmpty) return empty;
             int d = dist.CompareTo(bestDist);
             if (d != 0) return d < 0;
