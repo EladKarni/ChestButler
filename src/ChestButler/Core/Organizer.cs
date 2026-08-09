@@ -642,7 +642,15 @@ namespace ChestButler.Core
             if (!PrivateArea.CheckAccess(tgt.transform.position, 0f, false, true)) return Outcome.Drop;
             if (!PrivateArea.CheckAccess(src.transform.position, 0f, false, true)) return Outcome.Drop;
 
-            int room = Router.Room(tInv, item);
+            // Router.Room answers "can one more fit?" for a non-stackable — it returns 1 whenever the
+            // chest has any empty slot at all. That is right for the sorter tick, which moves a single
+            // stack per tick, but wrong here: `promised` counts ITEMS issued this run, so the first
+            // gear piece would promise 1, and every later gear move into the same chest would compute
+            // 1 - 1 = 0 and defer itself to the next press. In-game that showed up as Organize needing
+            // several presses, each one placing exactly one more tool/weapon. Count the slots instead.
+            int room = item.m_shared.m_maxStackSize <= 1
+                ? tInv.GetEmptySlots()
+                : Router.Room(tInv, item);
             if (promised.TryGetValue(tgt, out var already)) room -= already;
             if (room <= 0) return Outcome.Retry;            // may drain later in the run
 
