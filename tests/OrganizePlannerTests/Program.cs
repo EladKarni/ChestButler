@@ -185,6 +185,16 @@ internal static class Program
                 continue;
             }
             if (c.Anchors == null) c.Anchors = new Dictionary<string, AnchorKind>(StringComparer.Ordinal);
+            // ONE psort_home value per chest -> ONE Home anchor: an overwrite drops the previous
+            // Home-derived anchor too, exactly as the adapter re-derives it from the marker. This
+            // harness once kept both, which is impossible in-game and made the fuzz report phantom
+            // press-2 failures against the earlier incumbent-adoption attempts.
+            var stale = new List<string>();
+            foreach (var kv in c.Anchors)
+                if (kv.Value == AnchorKind.Home
+                    && !string.Equals(kv.Key, hm.BucketKey, StringComparison.Ordinal))
+                    stale.Add(kv.Key);
+            foreach (var k in stale) c.Anchors.Remove(k);
             c.Anchors[hm.BucketKey] = AnchorKind.Home;
         }
     }
@@ -459,8 +469,7 @@ internal static class Program
             // Where the marker earns its keep is when the census CHANGES. Buckets are allocated
             // largest-demand-first, so a new, bigger category will claim the nearest chests — including
             // the ones another bucket is already using. Below: wood settles first, then the player mines
-            // 2,000 stone. With the markers, wood's chests are anchors and stone must go elsewhere;
-            // without them, stone takes wood's chests and the whole wood pile relocates.
+            // 2,000 stone. With the markers, wood's chests are anchors and stone must go elsewhere.
             Func<List<ChestView>> baseWithWood = () => new List<ChestView>
             {
                 Chest(0, new[] { S("wood", 420, "wood") }, totalSlots: 24, excludedTarget: true),
@@ -479,6 +488,10 @@ internal static class Program
             foreach (var m in keptRun.Moves) if (m.Norm == "wood") woodMovedKept += m.Amount;
 
             // -- markers discarded --
+            // Since 2.0's incumbent adoption this no longer displaces the wood either: the wood
+            // bucket has no anchor left, so adoption re-derives its home from where it already
+            // sits and re-fences the chest before stone allocates. That is the owner's ore-chest
+            // complaint in miniature, closed by design rather than by the marker surviving.
             var lost = baseWithWood();
             Apply(lost, OrganizePlanner.Plan(In(lost)), applyHomes: false);
             lost[0].Stacks.Add(new StackView { Norm = "stone", Count = 2000, Stackable = true, BucketKey = "stone" });
@@ -489,9 +502,36 @@ internal static class Program
             Check(woodMovedKept == 0,
                 "WITH psort_home, a new bigger category does not displace the settled wood (moved " +
                 woodMovedKept + ")");
-            Check(woodMovedLost > 0,
-                "WITHOUT psort_home the settled wood is displaced - the marker is load-bearing (moved " +
+            Check(woodMovedLost == 0,
+                "with the marker LOST, incumbent adoption re-derives the same home (moved " +
                 woodMovedLost + ")");
+
+            // So where is the marker still load-bearing now that adoption exists? DIRECTION under
+            // contest. Adoption follows quantity (the chest holding most wins); the marker follows
+            // history. When a bigger fresh pile appears somewhere else, only the marker keeps the
+            // established chest as the home the pile consolidates INTO — drop it, and adoption
+            // crowns the bigger pile's chest instead. Same convergence either way; the marker
+            // decides which chest the player finds the wood in.
+            var dirKept = new List<ChestView>
+            {
+                Chest(0, new[] { S("wood", 100, "wood") }, totalSlots: 24, distance: 1f,
+                      home: "wood", anchors: Anchor("wood", AnchorKind.Home)),
+                Chest(1, new[] { S("wood", 300, "wood") }, totalSlots: 24, distance: 2f),
+                Chest(2, totalSlots: 24, distance: 3f),
+            };
+            var rDirKept = OrganizePlanner.Plan(In(dirKept));
+            Check(TotalTo(rDirKept.Moves, 0, "wood") == 300 && TotalFrom(rDirKept.Moves, 0) == 0,
+                "the MARKED home wins: the bigger new pile consolidates INTO it (marker load-bearing)");
+
+            var dirLost = new List<ChestView>
+            {
+                Chest(0, new[] { S("wood", 100, "wood") }, totalSlots: 24, distance: 1f),
+                Chest(1, new[] { S("wood", 300, "wood") }, totalSlots: 24, distance: 2f),
+                Chest(2, totalSlots: 24, distance: 3f),
+            };
+            var rDirLost = OrganizePlanner.Plan(In(dirLost));
+            Check(TotalTo(rDirLost.Moves, 1, "wood") == 100 && TotalFrom(rDirLost.Moves, 1) == 0,
+                "unmarked, adoption crowns the chest with the larger pile instead");
         }
 
         // 12) A claimed home survives as an anchor, and a dead marker is released.
@@ -539,6 +579,21 @@ internal static class Program
             };
             var r = OrganizePlanner.Plan(In(chests));
             Check(TotalTo(r.Moves, 1) > 0, "the chest anchoring an empty bucket is still used for wood");
+
+            // KILLS M18 the rest of the way: not only must the dead-anchor chest stay claimable
+            // when it is the ONLY room left (above), it must not even be DEMOTED below a plain
+            // chest. Counting a dead anchor as "shared" quietly re-ranks it last, so the wood
+            // walks past the nearer chest for no reason the player can see (§16.4.6).
+            var demoted = new List<ChestView>
+            {
+                Chest(0, new[] { S("wood", 100, "wood") }, totalSlots: 24, distance: 0.1f,
+                      excludedTarget: true),
+                Chest(1, totalSlots: 24, distance: 1f, anchors: Anchor("meads", AnchorKind.Sign)),
+                Chest(2, totalSlots: 24, distance: 2f),
+            };
+            var rDem = OrganizePlanner.Plan(In(demoted));
+            Check(TotalTo(rDem.Moves, 1) == 100 && TotalTo(rDem.Moves, 2) == 0,
+                "a dead anchor does not demote its chest either - the nearer chest still wins (M18)");
         }
 
         // 14) Determinism: identical input -> byte-identical plan; ties break on uid.
@@ -1080,11 +1135,99 @@ internal static class Program
                 "rank stone<wood: stone wins it instead - a hash order cannot pass both");
         }
 
-        // 31) The convergence fuzz, promoted from the scratchpad harness that caught the only two
-        //     real regressions this week: 300 fixed-seed randomized bases; press 2 and press 3 must
-        //     move zero items, homeless must never grow, and items must be conserved throughout.
-        Console.WriteLine("[31] convergence fuzz: 300 randomized bases settle by press 2");
+        // 31) KILLS M32 — adoption ignoring the anchored-bucket skip. An anchor is an instruction;
+        //     incumbency is only a default. A bucket with a sign chest too small for it must spill
+        //     into the NEARER free chest, not squat on the chest it happens to sit in — and the one
+        //     psort_home of the run goes to the claimed spill chest, never the holder.
+        Console.WriteLine("[31] adoption fills a vacuum only: an anchored bucket never self-adopts");
+        {
+            var chests = new List<ChestView>
+            {
+                Chest(0, new[] { S("iron", 100, "metals") }, totalSlots: 24, distance: 3f),
+                Chest(1, totalSlots: 1, distance: 1f, anchors: Anchor("metals", AnchorKind.Sign)),
+                Chest(2, totalSlots: 24, distance: 2f),
+            };
+            var r = OrganizePlanner.Plan(In(chests));
+            Check(TotalTo(r.Moves, 1, "iron") == 50, "the 1-slot sign anchor fills first");
+            Check(TotalTo(r.Moves, 2, "iron") == 50,
+                "the spill claims the nearer free chest - adopting the holder would keep it there (M32)");
+            Check(r.HomeMarks.Count == 1 && r.HomeMarks[0].ChestId == 2
+                  && r.HomeMarks[0].BucketKey == "metals",
+                "exactly one psort_home, on the claimed spill chest, never the anchored bucket's holder");
+        }
+
+        // 32) KILLS M17 / M02 — the reservedBy half of the shared key. A fresh phase-2 claim must
+        //     fence its chest for the REST OF THIS RUN even though no anchor exists yet: the second
+        //     bucket sees `shared` via reservedBy alone (both candidates rank non-empty, and the
+        //     reserved chest is nearer, so only the shared key keeps the co-tenant out).
+        Console.WriteLine("[32] a fresh claim fences its chest within the run (reservedBy)");
+        {
+            var chests = new List<ChestView>
+            {
+                Chest(0, new[] { S("iron", 200, "metals"), S("carrot", 100, "cooking") },
+                      totalSlots: 24, distance: 0.1f, excludedTarget: true),
+                Chest(1, totalSlots: 24, distance: 1f),
+                Chest(2, new[] { S("junk", 10, null) }, totalSlots: 24, distance: 2f),
+            };
+            var r = OrganizePlanner.Plan(In(chests));
+            Check(TotalTo(r.Moves, 1, "iron") == 200, "the bigger bucket claims the nearer empty chest");
+            Check(TotalTo(r.Moves, 2, "carrot") == 100 && TotalTo(r.Moves, 1, "carrot") == 0,
+                "the second bucket respects the fresh claim and takes the farther chest (M17/M02 co-tenant)");
+
+            // The deeper reason reservedBy must exist even though the marker fixed point can
+            // untangle a squat after the fact: WITHOUT it, the untangling happens in the wrong
+            // bucket's favour. Three buckets, ores(6 slots) > metals(4) = wood(4), three non-empty
+            // 12-slot chests. The §16.4.1/[30] contract says the equal-demand tie resolves by rank
+            // then ordinal — metals before wood — so metals gets the nearer chest. Drop reservedBy
+            // and metals squats in ores' chest on the first pass, wood's spill marker claims the
+            // middle chest meanwhile, and the settled base has metals and wood SWAPPED: same
+            // convergence, inverted tie-break. (Found by a differential harness against exactly
+            // this mutation; the fuzz alone cannot see it because both endpoints are stable.)
+            var order = new List<ChestView>
+            {
+                Chest(0, new[] { S("copperore", 300, "ores"), S("iron", 200, "metals"),
+                                 S("wood", 200, "wood") },
+                      totalSlots: 48, distance: 0.1f, excludedTarget: true),
+                Chest(1, new[] { S("junk1", 5, null) }, totalSlots: 12, distance: 1f),
+                Chest(2, new[] { S("junk2", 5, null) }, totalSlots: 12, distance: 2f),
+                Chest(3, new[] { S("junk3", 5, null) }, totalSlots: 12, distance: 3f),
+            };
+            var rOrder = OrganizePlanner.Plan(In(order));
+            Check(TotalTo(rOrder.Moves, 1, "copperore") == 300, "largest demand takes the nearest chest");
+            Check(TotalTo(rOrder.Moves, 2, "iron") == 200,
+                "metals wins the equal-demand tie for the middle chest (ordinal, [30]'s contract)");
+            Check(TotalTo(rOrder.Moves, 3, "wood") == 200,
+                "and wood takes the far chest - dropping reservedBy settles them swapped (M17)");
+        }
+
+        // 33) The convergence fuzz, promoted from the scratchpad harness that caught the only two
+        //     real regressions this week: 300 fixed-seed randomized bases per marker mode; press 2
+        //     and press 3 must move zero items, homeless must never grow, and items must be
+        //     conserved throughout. Three modes: stale markers, LIVE external markers (the shape
+        //     the marker fixed point exists for), and incumbent-heavy bases (the adoption gate).
+        Console.WriteLine("[33] convergence fuzz: 3x300 randomized bases settle by press 2");
         ConvergenceFuzz.Run(Check);
+
+        // 34) The red-team's stale-marker adoption miss: an incumbent carrying a DELETED bucket's
+        //     psort_home must still be adoptable. Adoption runs before the fixed point clears dead
+        //     markers, so gating on "any marker at all" left the established ore chest unadoptable
+        //     and geometry emptied it into a nearer empty chest - the exact complaint adoption
+        //     exists to fix. Only a LIVE bucket's marker reserves a chest against adoption.
+        Console.WriteLine("[34] a dead bucket's stale marker does not block adoption");
+        {
+            var chests = new List<ChestView>
+            {
+                Chest(0, totalSlots: 24, distance: 0.1f),
+                Chest(1, totalSlots: 24, distance: 1f),
+                Chest(2, new[] { S("copperore", 900, "ores") }, totalSlots: 24, distance: 5f,
+                      anchors: Anchor("deadbucket", AnchorKind.Home), home: "deadbucket"),
+            };
+            var r = OrganizePlanner.Plan(In(chests));
+            Check(r.Moves.Count == 0, "the ore stays in its established chest despite the stale marker");
+            Check(r.HomeMarks.Count == 1 && r.HomeMarks[0].ChestId == 2
+                  && r.HomeMarks[0].BucketKey == "ores",
+                "one write: the stale marker is overwritten with the adopter's own (chest 2 -> ores)");
+        }
 
         Console.WriteLine("================================");
         Console.WriteLine($"RESULT: {_passed} passed, {_failed} failed");

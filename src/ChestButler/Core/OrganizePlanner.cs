@@ -180,7 +180,300 @@ namespace ChestButler.Core
             public bool Claimed;   // the allocator took this chest itself → gets a psort_home marker
         }
 
+        /// <summary>How many plan/replay iterations <see cref="Plan"/> may take to reach a marker
+        /// fixed point before degrading to a fresh allocation. The fuzz has never needed more than
+        /// 5 across 300 seeds x 3 marker modes; 8 leaves headroom without hiding a real
+        /// oscillation behind endless retries.</summary>
+        private const int HomeFixedPointCap = 8;
+
         internal static PlannerResult Plan(PlannerInput input)
+        {
+            if (input?.Chests == null || input.Chests.Count == 0) return new PlannerResult();
+
+            // ---- 0. marker fixed point (v2 plan §4.1, in service of the §12 acceptance test) ----
+            //
+            // PlanOnce's target layout is a pure function of (demand, geometry, anchors) — but its
+            // own HomeMark output MUTATES the anchor set the next press plans against. Press 2
+            // therefore diverges from press 1 whenever the input psort_home markers are not already
+            // a fixed point of the allocation. The planner's own markers are a fixed point by
+            // construction; externally seeded live markers generally are not, and the convergence
+            // fuzz caught three distinct ways they destabilise exactly one press: clearing an
+            // unearned marker un-fences the chest for every other bucket (PickFreeChest's shared
+            // key flips), a marked chest claimed mine-first swaps per-chest slot budgets with the
+            // fresh claim order, and a bigger bucket consuming a marked chest cascades the first
+            // two across presses.
+            //
+            // This is also precisely why the two earlier incumbent-adoption attempts failed the
+            // fuzz (428/1500 and 183/1500 press-2 failures) and were reverted: adoption seeds a
+            // live marker on a chest that is not wholly empty — the unstable shape — and then
+            // shipped a plan the rewritten marker set disagreed with, so press 2 re-planned
+            // against different anchors and moved items. The fix is to keep re-planning HERE,
+            // against a planner-local overlay, until a pass emits zero marks: the emitted plan is
+            // then already consistent with the marker state it leaves behind, so press 2 diffs to
+            // nothing — for external markers and adopted ones alike, by construction.
+            var overlay = CloneForOverlay(input.Chests, false);
+            var inner = WithChests(input, overlay);
+
+            AdoptIncumbentHomes(overlay,
+                input.MaxStackOf ?? (_ => 1),
+                input.BucketRank ?? (_ => 0),
+                Math.Max(1, input.MiscPromoteSlots));
+
+            PlannerResult pass = null;
+            for (int iter = 0; iter < HomeFixedPointCap; iter++)
+            {
+                pass = PlanOnce(inner);
+                if (pass.HomeMarks.Count == 0) break;                // anchors are a fixed point
+                ApplyMarksToOverlay(overlay, pass.HomeMarks);
+                pass = null;
+            }
+            if (pass == null)
+            {
+                // Cap overflow: something oscillates. Degrade deterministically — treat every
+                // pre-existing Home anchor as dead and plan once, which is the fresh allocation
+                // that was press-2 stable on its own markers long before this loop existed.
+                overlay = CloneForOverlay(input.Chests, true);
+                inner = WithChests(input, overlay);
+                pass = PlanOnce(inner);
+                ApplyMarksToOverlay(overlay, pass.HomeMarks);
+            }
+
+            // The final pass's moves, plus the CUMULATIVE marker delta against the real input —
+            // intermediate write-then-clear churn on the same chest collapses to nothing.
+            var result = new PlannerResult();
+            result.Moves.AddRange(pass.Moves);
+            result.Summary = pass.Summary;
+            for (int i = 0; i < input.Chests.Count; i++)
+            {
+                var real = input.Chests[i];
+                var view = overlay[i];
+                if (real == null || view == null) continue;
+                string was = string.IsNullOrEmpty(real.HomeMarker) ? null : real.HomeMarker;
+                string now = string.IsNullOrEmpty(view.HomeMarker) ? null : view.HomeMarker;
+                if (!string.Equals(was, now, StringComparison.Ordinal))
+                    result.HomeMarks.Add(new HomeMark { ChestId = i, BucketKey = now });
+            }
+            return result;
+        }
+
+        /// <summary>Anchor-state working copy for the fixed-point loop. Stacks are shared, not
+        /// cloned — PlanOnce never mutates them, and copying a 400-chest census every iteration
+        /// would violate the §15 hot-path budget for nothing.</summary>
+        private static List<ChestView> CloneForOverlay(IReadOnlyList<ChestView> chests, bool stripHome)
+        {
+            var view = new List<ChestView>(chests.Count);
+            for (int i = 0; i < chests.Count; i++)
+            {
+                var c = chests[i];
+                if (c == null) { view.Add(null); continue; }
+
+                Dictionary<string, AnchorKind> anchors = null;
+                if (c.Anchors != null)
+                    foreach (var kv in c.Anchors)
+                    {
+                        if (stripHome && kv.Value == AnchorKind.Home) continue;
+                        if (anchors == null) anchors = new Dictionary<string, AnchorKind>(StringComparer.Ordinal);
+                        anchors[kv.Key] = kv.Value;
+                    }
+
+                view.Add(new ChestView
+                {
+                    Id = c.Id, UidKey = c.UidKey, Distance = c.Distance,
+                    TotalSlots = c.TotalSlots, Priority = c.Priority, Stacks = c.Stacks,
+                    ExcludedAsTarget = c.ExcludedAsTarget, ExcludedAsSource = c.ExcludedAsSource,
+                    Anchors = anchors, HomeMarker = stripHome ? null : c.HomeMarker,
+                });
+            }
+            return view;
+        }
+
+        private static PlannerInput WithChests(PlannerInput input, List<ChestView> chests)
+            => new PlannerInput
+            {
+                Chests = chests,
+                MaxStackOf = input.MaxStackOf,
+                BucketRank = input.BucketRank,
+                DistanceBetween = input.DistanceBetween,
+                MiscPromoteSlots = input.MiscPromoteSlots,
+            };
+
+        /// <summary>Replay a pass's HomeMarks onto the overlay exactly as the adapter would derive
+        /// anchors from the written markers next press: ONE psort_home value per chest means one
+        /// Home anchor, so an overwrite drops the previous Home-derived anchor too. Modelling that
+        /// wrong (keeping both) was a real bug in the offline harness that inflated the failure
+        /// counts of the reverted adoption attempts.</summary>
+        private static void ApplyMarksToOverlay(List<ChestView> overlay, List<HomeMark> marks)
+        {
+            for (int i = 0; i < marks.Count; i++)
+            {
+                var hm = marks[i];
+                var c = overlay[hm.ChestId];
+                if (c == null) continue;
+                c.HomeMarker = hm.BucketKey;
+
+                if (c.Anchors != null)
+                {
+                    var drop = new List<string>();
+                    foreach (var kv in c.Anchors)
+                        if (kv.Value == AnchorKind.Home
+                            && !string.Equals(kv.Key, hm.BucketKey, StringComparison.Ordinal))
+                            drop.Add(kv.Key);
+                    foreach (var k in drop) c.Anchors.Remove(k);
+                    if (c.Anchors.Count == 0) c.Anchors = null;
+                }
+
+                if (hm.BucketKey == null) continue;
+                if (c.Anchors == null) c.Anchors = new Dictionary<string, AnchorKind>(StringComparer.Ordinal);
+                // never DOWNGRADE a pin/sign/station anchor the same bucket already has here —
+                // the adapter keeps the strongest reason, the marker only adds the weakest
+                if (!c.Anchors.TryGetValue(hm.BucketKey, out var k2) || k2 < AnchorKind.Home)
+                    c.Anchors[hm.BucketKey] = AnchorKind.Home;
+            }
+        }
+
+        /// <summary>Incumbent adoption — the 2.0.0 release gate (2.0 follow-ups, decision 4): a
+        /// live bucket with no anchor of any kind adopts the chest that already holds most of it,
+        /// recorded as a psort_home exactly as if the allocator had claimed the chest (§4.1). The
+        /// free pick's empty/distance keys are deliberately blind to movable contents (a chest
+        /// drains during execution, §4 step 4), so without this an established but never-pinned
+        /// ore chest was emptied into an arbitrary nearer neighbour on the first press.
+        ///
+        /// Adoption only fills a vacuum: any pin/sign/station/Home anchor anywhere means the
+        /// player — or a previous run — already said where this bucket lives, and quantity does
+        /// not get to overrule that. The adopted chest must not be excluded, must carry no
+        /// psort_home at all (one marker per chest is the wire format), and must not anchor
+        /// another live bucket (mirrors PickFreeChest's shared key, §16.4.6). Seeding happens on
+        /// the overlay BEFORE the fixed-point loop: if the allocation honours the marker it is
+        /// simply replayed like any other Home; if it cannot (a bigger bucket needs the chest),
+        /// the loop clears it and converges anyway — the safety the two reverted attempts lacked.</summary>
+        private static void AdoptIncumbentHomes(
+            List<ChestView> overlay,
+            Func<string, int> maxStackOf,
+            Func<string, int> bucketRank,
+            int promoteSlots)
+        {
+            // Mini-census mirroring step 1's enrolment rules: who holds how much of which bucket.
+            var heldBy = new Dictionary<string, Dictionary<int, int>>(StringComparer.Ordinal);
+            var normTotals = new Dictionary<string, Dictionary<string, int>>(StringComparer.Ordinal);
+            for (int ci = 0; ci < overlay.Count; ci++)
+            {
+                var c = overlay[ci];
+                if (c?.Stacks == null) continue;
+                for (int si = 0; si < c.Stacks.Count; si++)
+                {
+                    var s = c.Stacks[si];
+                    if (string.IsNullOrEmpty(s.Norm) || s.Count <= 0) continue;
+                    if (c.ExcludedAsSource || string.IsNullOrEmpty(s.BucketKey)) continue;
+
+                    if (!heldBy.TryGetValue(s.BucketKey, out var byChest))
+                    {
+                        byChest = new Dictionary<int, int>();
+                        heldBy[s.BucketKey] = byChest;
+                        normTotals[s.BucketKey] = new Dictionary<string, int>(StringComparer.Ordinal);
+                    }
+                    byChest[ci] = (byChest.TryGetValue(ci, out var h) ? h : 0) + s.Count;
+                    var nt = normTotals[s.BucketKey];
+                    nt[s.Norm] = (nt.TryGetValue(s.Norm, out var t) ? t : 0) + s.Count;
+                }
+            }
+
+            // Mirror the §16.4.1 fold before choosing: a per-type bucket that will not earn its
+            // chest joins misc here too, or adoption would seed a marker for a bucket PlanOnce
+            // gives zero demand — dead on arrival and immediately cleared again (§16.4.6).
+            var fold = new List<string>();
+            foreach (var kv in normTotals)
+            {
+                if (!BucketKeys.IsPerType(kv.Key)) continue;
+                if (AnyChestAnchors(overlay, kv.Key)) continue;
+                int slots = 0;
+                foreach (var nt in kv.Value) slots += CeilDiv(nt.Value, Math.Max(1, maxStackOf(nt.Key)));
+                if (slots <= promoteSlots) fold.Add(kv.Key);
+            }
+            foreach (var key in fold)
+            {
+                if (!heldBy.TryGetValue(BucketKeys.Misc, out var miscBy))
+                {
+                    miscBy = new Dictionary<int, int>();
+                    heldBy[BucketKeys.Misc] = miscBy;
+                    normTotals[BucketKeys.Misc] = new Dictionary<string, int>(StringComparer.Ordinal);
+                }
+                foreach (var kv in heldBy[key])
+                    miscBy[kv.Key] = (miscBy.TryGetValue(kv.Key, out var h) ? h : 0) + kv.Value;
+                var miscNorms = normTotals[BucketKeys.Misc];
+                foreach (var nt in normTotals[key])
+                    miscNorms[nt.Key] = (miscNorms.TryGetValue(nt.Key, out var t) ? t : 0) + nt.Value;
+                heldBy.Remove(key);
+                normTotals.Remove(key);
+            }
+
+            // Same largest-demand-first order as the allocator, so when two homeless buckets
+            // mostly live in the SAME chest, the one that would be allocated first adopts it and
+            // the other keeps deriving its home from geometry — no new tie-break rules to keep
+            // stable across presses.
+            var demandSlots = new Dictionary<string, int>(StringComparer.Ordinal);
+            foreach (var kv in normTotals)
+            {
+                int slots = 0;
+                foreach (var nt in kv.Value) slots += CeilDiv(nt.Value, Math.Max(1, maxStackOf(nt.Key)));
+                demandSlots[kv.Key] = slots;
+            }
+            var order = new List<string>(heldBy.Keys);
+            order.Sort((x, y) =>
+            {
+                int dd = demandSlots[y].CompareTo(demandSlots[x]);
+                if (dd != 0) return dd;
+                dd = bucketRank(x).CompareTo(bucketRank(y));
+                return dd != 0 ? dd : string.CompareOrdinal(x, y);
+            });
+            var live = new HashSet<string>(order, StringComparer.Ordinal);
+
+            foreach (var bucket in order)
+            {
+                if (AnyChestAnchors(overlay, bucket)) continue;      // adoption only fills a vacuum
+
+                int bestChest = -1, bestHeld = 0;
+                float bestDist = 0f;
+                string bestUid = null;
+                var byChest = heldBy[bucket];
+                for (int ci = 0; ci < overlay.Count; ci++)
+                {
+                    if (!byChest.TryGetValue(ci, out var held) || held <= 0) continue;
+                    var c = overlay[ci];
+                    if (c == null || c.ExcludedAsTarget) continue;
+                    // One psort_home per chest — but only a LIVE bucket's marker reserves it.
+                    // Adoption runs before the fixed point clears dead markers, so blocking on any
+                    // marker at all left an incumbent carrying a deleted bucket's stale marker
+                    // unadoptable: the established chest was then emptied by geometry, the exact
+                    // complaint adoption exists to fix. A dead marker is about to be cleared anyway,
+                    // and the overlay overwrite drops its Home anchor with adapter semantics.
+                    if (!string.IsNullOrEmpty(c.HomeMarker) && live.Contains(c.HomeMarker)) continue;
+                    if (AnchorsAnotherLiveBucket(c, bucket, live)) continue;
+
+                    bool better = bestChest < 0 || held > bestHeld;
+                    if (!better && held == bestHeld)
+                    {
+                        int dcmp = c.Distance.CompareTo(bestDist);
+                        better = dcmp < 0 || (dcmp == 0 &&
+                                 string.CompareOrdinal(c.UidKey ?? "", bestUid) < 0);
+                    }
+                    if (!better) continue;
+                    bestChest = ci; bestHeld = held;
+                    bestDist = c.Distance; bestUid = c.UidKey ?? "";
+                }
+                if (bestChest < 0) continue;
+
+                var home = overlay[bestChest];
+                home.HomeMarker = bucket;
+                if (home.Anchors == null)
+                    home.Anchors = new Dictionary<string, AnchorKind>(StringComparer.Ordinal);
+                home.Anchors[bucket] = AnchorKind.Home;
+            }
+        }
+
+        /// <summary>One allocation pass against a fixed anchor set. Only ever called from
+        /// <see cref="Plan"/>'s fixed-point loop — its HomeMarks are a statement about the anchors
+        /// it planned against, not something safe to write to the world directly.</summary>
+        private static PlannerResult PlanOnce(PlannerInput input)
         {
             var result = new PlannerResult();
             if (input?.Chests == null || input.Chests.Count == 0) return result;
