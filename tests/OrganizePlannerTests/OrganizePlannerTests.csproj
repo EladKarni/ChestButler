@@ -30,6 +30,9 @@
     <!-- W2: Gather's shortfall arithmetic. The button and the MUC pull need a game; this does not,
          and it is where the off-by-one bugs live. -->
     <Compile Include="../../src/ChestButler/Core/GatherMath.cs" Link="GatherMath.cs" />
+    <!-- Sign text grammar, split out of Filters for exactly this reach: the area-off radius rule
+         ("sort: off" + a number = ignore every chest within that many metres) lives here. -->
+    <Compile Include="../../src/ChestButler/Core/SignGrammar.cs" Link="SignGrammar.cs" />
   </ItemGroup>
 
 </Project>

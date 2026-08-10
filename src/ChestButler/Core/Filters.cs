@@ -178,24 +178,28 @@ namespace ChestButler.Core
             var cpos = c.transform.position;
             foreach (var sign in Signs)
             {
-                if (Vector3.Distance(sign.transform.position, cpos) > SignRange) continue;
-                if (!IsNearestContainerTo(sign.transform.position, c)) continue; // sign belongs to closest chest only
-
                 var text = sign.GetText();
                 if (string.IsNullOrEmpty(text)) continue;
-                foreach (var line in text.Split('\n'))
+                var parsed = SignGrammar.Parse(text);
+                float dist = Vector3.Distance(sign.transform.position, cpos);
+
+                // AREA off: "sort: off" plus a number (own line or token) ignores every chest
+                // within that many metres of the SIGN - one sign protects a whole vault room.
+                // Deliberately no nearest-container binding here: that rule exists so a label
+                // attaches to one chest, and an area sign is by definition not labelling one chest.
+                if (parsed.HasOff && parsed.AreaOffRadius > 0f && dist <= parsed.AreaOffRadius)
+                    spec.Ignore = true;
+
+                // Classic single-chest binding for everything else the sign says.
+                if (dist > SignRange) continue;
+                if (!IsNearestContainerTo(sign.transform.position, c)) continue; // sign belongs to closest chest only
+
+                if (parsed.HasOff) spec.Ignore = true;
+                foreach (var t in parsed.Tokens)
                 {
-                    var l = line.Trim();
-                    if (!l.ToLowerInvariant().StartsWith("sort:")) continue;
-                    foreach (var raw in l.Substring(5).Split(','))
-                    {
-                        var t = raw.Trim().ToLowerInvariant();
-                        if (t.Length == 0) continue;
-                        if (t == "off" || t == "ignore" || t == "none") { spec.Ignore = true; }
-                        else if (t.Length >= 2 && t[0] == 'p' && int.TryParse(t.Substring(1), out var p)) { spec.Priority = p; }
-                        else if (Groups.IsGroup(t)) { spec.GroupNames.Add(t); }
-                        else { spec.Items.Add(t); }
-                    }
+                    if (t.Length >= 2 && t[0] == 'p' && int.TryParse(t.Substring(1), out var p)) { spec.Priority = p; }
+                    else if (Groups.IsGroup(t)) { spec.GroupNames.Add(t); }
+                    else { spec.Items.Add(t); }
                 }
             }
         }
