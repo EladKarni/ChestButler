@@ -23,15 +23,21 @@ namespace ChestButler.Core
     /// added via the CustomStations entry without a rebuild.</summary>
     internal static class Stations
     {
+        // 2.0: FEED-IN PROCESSORS ONLY. Crafting stations (forge, workbench, stonecutter, cauldron,
+        // black forge, galdr table) were dropped from the defaults — Gather made them obsolete: you
+        // stand at the station, pull exactly what the recipe needs from anywhere in range, and a
+        // Sorter chest returns the leftovers. Pooling materials beside the station no longer serves
+        // that loop, and crafting-station adjacency (workbenches especially — every chest cluster
+        // has one in range) was the top source of "why did my items go THERE?" all through 1.1.x.
+        // Smelters, blast furnaces and fermenters stay: they have no recipe UI — you physically feed
+        // them — so chest-by-the-smelter pooling is the only workflow that serves them.
+        //
+        // Migration: removing a bind makes any stored per-station cfg line INERT (BepInEx only
+        // surfaces bound keys), so upgraded servers lose crafting-station attraction automatically.
+        // A server that wants it back adds e.g. '$piece_forge=metals,ores' to CustomStations.
         private static readonly Dictionary<string, string> Defaults = new Dictionary<string, string>
         {
-            { "$piece_forge",         "metals, ores" },
-            { "$piece_workbench",     "wood, hides" },
-            { "$piece_stonecutter",   "stone" },
-            { "$piece_cauldron",      "cooking, meat, seeds" },
             { "$piece_fermenter",     "meads" },
-            { "$piece_blackforge",    "metals, valuables" },
-            { "$piece_magetable",     "valuables, meads" },
             { "$piece_smelter",       "ores, fuel" },
             { "$piece_blastfurnace",  "ores, fuel" },
         };
