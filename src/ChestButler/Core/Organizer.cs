@@ -34,6 +34,12 @@ namespace ChestButler.Core
         /// <summary>Plan-time cost, so the DoD's "stopwatch BuildPlan before and after" is a measured
         /// number in the log rather than an assumption.</summary>
         public float BuildMs;
+
+        /// <summary>How many chests the census saw. After spawn or a zone change the base streams in
+        /// over several seconds, and a plan built early is complete only relative to what existed —
+        /// the staging "1050 items appeared" mystery was 17 chests finishing instantiation, not items
+        /// moving. A census count that grows between presses makes that visible.</summary>
+        public int CensusChests;
     }
 
     /// <summary>Unity glue around the pure allocator. BuildPlan snapshots live chests into POD views,
@@ -87,7 +93,8 @@ namespace ChestButler.Core
                 timer.Dispose();            // feeds the self-throttle (§16.6)
                 Plugin.Log.LogInfo("[organize] BuildPlan took " + result.BuildMs.ToString("0.0") +
                     " ms: " + result.Moves.Count + " move(s), " + result.Summary.BucketsPlanned +
-                    " bucket(s), " + result.Summary.HomelessItems + " item(s) with no room");
+                    " bucket(s), " + result.Summary.HomelessItems + " item(s) with no room, census " +
+                    result.CensusChests + " chest(s)");
             }
             return result;
         }
@@ -105,6 +112,7 @@ namespace ChestButler.Core
             }
 
             int n = containers.Count;
+            result.CensusChests = n;
 
             // §15.2 / §16.3: ONE station pass per run. GroupsForChest walks every CraftingStation and
             // every registered processor with a GetComponentInParent<ZNetView>() per candidate, so
@@ -502,7 +510,9 @@ namespace ChestButler.Core
         /// so the next fix targets the measured cause, not the plausible one.</summary>
         private enum Why
         {
-            None, SrcGone, DeadNView, InFlight, Access, NoRoom, InUse, OwnerHeld
+            None, SrcGone, DeadNView, InFlight, Access, NoRoom, InUse, OwnerHeld,
+            Declined,     // MUC returned its dummy request: it did nothing and will answer nothing
+            RespFailed    // MUC's response said Success=false: the owner-side remove did not happen
         }
 
         private enum Outcome { Issued, Retry, Drop }
@@ -516,6 +526,25 @@ namespace ChestButler.Core
             public int Amount;
         }
 
+        /// <summary>Per-run ledgers shared between the coroutine and the completion sweep. Split out
+        /// because CountOutstanding now settles ACCOUNTING, not just backpressure: §16.2.9 moved the
+        /// credit for a move from issue time to the moment MUC's response confirms it.</summary>
+        private sealed class RunState
+        {
+            /// <summary>§16.2.3: Router.Room reads a LOCAL inventory that does not reflect in-flight
+            /// adds, so N moves into one chest all saw the same free space and all issued. Debit what
+            /// we have already promised each destination for the whole run.</summary>
+            public readonly Dictionary<Container, int> Promised = new Dictionary<Container, int>();
+
+            public readonly List<Outstanding> Outstanding = new List<Outstanding>();
+
+            public int MovedItems;        // CONFIRMED: synchronous applies + responses with Success=true
+            public int FailedMoves;       // responses with Success=false — nothing moved anywhere
+            public int FailedItems;
+            public int UnverifiedItems;   // request vanished without a recorded response (foreign code)
+            public int DroppedRequests;   // deadline expiries: no response at all
+        }
+
         private static IEnumerator Run(OrganizePlan plan)
         {
             try
@@ -523,15 +552,12 @@ namespace ChestButler.Core
                 int perSecond = Throttle.MovesPerSecond(OrganizeConfig.MovesPerSecondValue);
                 int maxThisRun = OrganizeConfig.MaxMovesPerRunValue;
 
-                int issued = 0, movedItems = 0;
-                int skippedMoves = 0, skippedItems = 0, droppedRequests = 0;
+                int issued = 0;
+                int skippedMoves = 0, skippedItems = 0;
                 var targetsHit = new HashSet<Container>();
 
-                // §16.2.3: Router.Room reads a LOCAL inventory that does not reflect in-flight adds,
-                // so N moves into one chest all saw the same free space and all issued. Debit what we
-                // have already promised each destination for the whole run.
-                var promised = new Dictionary<Container, int>();
-                var outstanding = new List<Outstanding>();
+                var rs = new RunState();
+                MucResults.Clear();     // stale answers from Puller/Gather must not credit our ids
 
                 // Diagnostic tallies for the skip-breakdown line (see Why's doc comment).
                 var skipWhy = new Dictionary<Why, int>();
@@ -565,7 +591,7 @@ namespace ChestButler.Core
                         }
 
                         // ---- backpressure: our own ledger, not InventoryBlock (§15.6) --------------
-                        while (CountOutstanding(outstanding, promised, ref droppedRequests) >= MaxOutstanding)
+                        while (CountOutstanding(rs) >= MaxOutstanding)
                             yield return null;
 
                         var timer = Throttle.Measure();
@@ -574,7 +600,7 @@ namespace ChestButler.Core
                         int requestId;
                         try
                         {
-                            outcome = TryIssue(pm.Move, promised, out amount, out requestId,
+                            outcome = TryIssue(pm.Move, rs.Promised, out amount, out requestId,
                                                out pm.LastWhy, out pm.LastOwner);
                         }
                         finally
@@ -587,10 +613,12 @@ namespace ChestButler.Core
                             tokens -= 1f;
                             issued++;
                             issuedThisDrain++;
-                            movedItems += amount;
                             targetsHit.Add(pm.Move.Target);
                             if (requestId != 0)
-                                outstanding.Add(new Outstanding
+                                // NOT credited yet: movedItems counts confirmed transfers only, and
+                                // this one is a network round-trip away. CountOutstanding settles it
+                                // from the recorded response (§16.2.9).
+                                rs.Outstanding.Add(new Outstanding
                                 {
                                     RequestId = requestId,
                                     Deadline = Time.realtimeSinceStartup + OutstandingDeadline,
@@ -598,11 +626,16 @@ namespace ChestButler.Core
                                     Amount = amount,
                                 });
                             else
-                                // Applied synchronously (or MUC declined): either way the target's
-                                // local inventory is already authoritative, so the promise would
-                                // double-count from this very frame. Release it now - there is no
-                                // outstanding entry to release it later.
-                                ReleasePromise(promised, pm.Move.Target, amount);
+                            {
+                                // request == null: we own the source, so MUC took its synchronous
+                                // path - the remove and the destination add both applied on this
+                                // call stack, this frame. Credit now and release the promise; there
+                                // is no outstanding entry to settle it later. (MUC's silent decline
+                                // used to be conflated with this case - TryIssue now returns
+                                // Why.Declined for it before we get here.)
+                                rs.MovedItems += amount;
+                                ReleasePromise(rs.Promised, pm.Move.Target, amount);
+                            }
                         }
                         else if (outcome == Outcome.Retry)
                         {
@@ -610,7 +643,7 @@ namespace ChestButler.Core
                             // — the eviction that frees this move's room may simply not have echoed
                             // back yet — so it costs no attempt. Only a Retry against a settled world
                             // counts toward MaxAttemptsPerMove.
-                            bool settled = CountOutstanding(outstanding, promised, ref droppedRequests) == 0;
+                            bool settled = CountOutstanding(rs) == 0;
                             if (!settled || ++pm.Attempts < MaxAttemptsPerMove)
                                 retry.Add(pm);
                             else
@@ -635,9 +668,9 @@ namespace ChestButler.Core
                     // presses. The OutstandingDeadline sweep bounds the wait.
                     if (issuedThisDrain == 0)
                     {
-                        if (CountOutstanding(outstanding, promised, ref droppedRequests) > 0)
+                        if (CountOutstanding(rs) > 0)
                         {
-                            while (CountOutstanding(outstanding, promised, ref droppedRequests) > 0)
+                            while (CountOutstanding(rs) > 0)
                                 yield return null;
                             queue = retry;
                             continue;
@@ -653,18 +686,28 @@ namespace ChestButler.Core
                     queue = retry;
                 }
 
-                // Let the tail of the queue settle so the "still outstanding" number is meaningful.
-                float waitUntil = Time.realtimeSinceStartup + 1.5f;
-                while (Time.realtimeSinceStartup < waitUntil &&
-                       CountOutstanding(outstanding, promised, ref droppedRequests) > 0)
+                // Settle EVERYTHING before reporting: movedItems is a confirmed count now, so the
+                // report has to wait for the answers. Bounded: every outstanding entry either
+                // completes or hits its deadline, so this cannot outlive OutstandingDeadline.
+                while (CountOutstanding(rs) > 0)
                     yield return null;
 
-                Report(movedItems, targetsHit.Count, skippedItems, plan.Summary.HomelessItems,
-                       droppedRequests, capped);
-                Plugin.Log.LogInfo("[organize] issued " + issued + " move(s) covering " + movedItems +
-                    " item(s) into " + targetsHit.Count + " chest(s); skipped " + skippedMoves +
-                    " move(s) covering " + skippedItems + " item(s); " + droppedRequests +
-                    " request(s) timed out; throttle scale " + Throttle.Scale.ToString("0.00"));
+                // Failed responses are moves that did not happen - fold them into the skip
+                // accounting so the player's "(N could not move)" and the breakdown line agree.
+                if (rs.FailedMoves > 0)
+                    skipWhy[Why.RespFailed] =
+                        (skipWhy.TryGetValue(Why.RespFailed, out var rf) ? rf : 0) + rs.FailedMoves;
+                int allSkippedMoves = skippedMoves + rs.FailedMoves;
+                int allSkippedItems = skippedItems + rs.FailedItems;
+
+                Report(rs.MovedItems, targetsHit.Count, allSkippedItems, plan.Summary.HomelessItems,
+                       rs.DroppedRequests, capped);
+                Plugin.Log.LogInfo("[organize] issued " + issued + " move(s); confirmed " +
+                    rs.MovedItems + " item(s) into " + targetsHit.Count + " chest(s); skipped " +
+                    allSkippedMoves + " move(s) covering " + allSkippedItems + " item(s); " +
+                    rs.DroppedRequests + " request(s) timed out" +
+                    (rs.UnverifiedItems > 0 ? "; " + rs.UnverifiedItems + " item(s) unverified" : "") +
+                    "; throttle scale " + Throttle.Scale.ToString("0.00"));
                 LogSkipBreakdown(skipWhy, skipOwners, skipOwnerDists);
             }
             finally
@@ -743,10 +786,27 @@ namespace ChestButler.Core
 
             if (!tgtNv.IsOwner()) tgtNv.ClaimOwnership();
 
+            // §16.2.9 (dedicated server, measured): MUC executes the REMOVE on the source's OWNER
+            // and silently declines when the source has no owner at all. Vanilla assigns ownership
+            // over activeArea-1 zones but instantiates over activeArea, so a chest in the outer
+            // band is plannable yet permanently unowned - and every move out of it no-op'd on every
+            // press: the immortal "3 moves / 34 items" cycle on staging. Claim unowned sources the
+            // way we claim targets; a source owned by another live peer is fine as-is, MUC routes
+            // the remove to that owner over RPC.
+            if (!srcNv.HasOwner()) srcNv.ClaimOwnership();
+
             // exactly Puller's transfer primitive — the ONLY sanctioned write path
             var request = ContainerHandler.RemoveItemFromChest(
                 src, item, tInv, new Vector2i(-1, -1),
                 tgtNv.GetZDO().m_uid, amount, null);
+
+            // A non-null request whose RequestID was never assigned is MUC's dummy decline: it did
+            // nothing, sent nothing, and will answer nothing. (Real ids come from
+            // PackageHandler.AddPackage - a random int, so 0 is possible in theory; the dummy is
+            // the only systematic source.) Counting these as moved is what made phantom successes
+            // and identical plans forever.
+            if (request != null && request.RequestID == 0)
+            { why = Why.Declined; return Outcome.Retry; }
 
             requestId = request != null ? request.RequestID : 0;
             promised[tgt] = already + amount;
@@ -810,41 +870,52 @@ namespace ChestButler.Core
             Plugin.Log.LogInfo(sb.ToString());
         }
 
-        /// <summary>How many of our issued requests MUC has not yet answered. A request disappears
-        /// from PackageHandler when its response is processed, so this is a real completion signal —
-        /// and one that needs no patch into MUC. Requests past their deadline are released with a log
-        /// line, because MUC has no timeout or sweep of its own (§15.6).
+        /// <summary>How many of our issued requests MUC has not yet answered — and the ONE place an
+        /// answered request is settled into the run's books. A request disappears from PackageHandler
+        /// when its response is processed; requests past their deadline are released with a log line,
+        /// because MUC has no timeout or sweep of its own (§15.6).
         ///
-        /// THE PROMISE IS RELEASED HERE, and that is the fix the skip-breakdown diagnostic bought:
-        /// the measured cause of "1170 could not move" was NoRoom=all at a fully SETTLED state -
-        /// not ownership, not in-flight lag. `promised` reserves a destination's space when a move
-        /// is ISSUED, but once the response lands the target's local inventory already contains
-        /// those items, so Router.Room has shrunk by them - and the never-released promise then
-        /// subtracted them AGAIN. Every landed move poisoned the ledger against every later move
-        /// into the same chest; big bases hit the margin constantly, small drills never did. The
-        /// deadline branch below even logged "releasing our reservation" while releasing nothing.
-        /// Now a promise lives exactly as long as its request: completion or deadline frees it.</summary>
-        private static int CountOutstanding(List<Outstanding> outstanding,
-            Dictionary<Container, int> promised, ref int dropped)
+        /// The promise is released here (the "1170 could not move" fix: a promise lives exactly as
+        /// long as its request), and since §16.2.9 the CREDIT happens here too. MUC removes the
+        /// package unconditionally BEFORE it reads Success, so queue departure is byte-identical for
+        /// a landed move and a refused one — the measured phantom-success loop. The response postfix
+        /// (Patches/MucResponsePatches.cs) records the actual verdict on the same call stack that
+        /// removes the package, so by the time this poll sees the package gone, MucResults already
+        /// knows whether it landed and for how many items.</summary>
+        private static int CountOutstanding(RunState rs)
         {
             float now = Time.realtimeSinceStartup;
             int live = 0;
-            for (int i = outstanding.Count - 1; i >= 0; i--)
+            for (int i = rs.Outstanding.Count - 1; i >= 0; i--)
             {
-                var o = outstanding[i];
+                var o = rs.Outstanding[i];
                 bool stillQueued = PackageHandler.GetPackage<RequestChestRemove>(o.RequestId, out var pkg) && pkg != null;
                 if (!stillQueued)
                 {
-                    ReleasePromise(promised, o.Target, o.Amount);
-                    outstanding.RemoveAt(i);
+                    ReleasePromise(rs.Promised, o.Target, o.Amount);
+                    rs.Outstanding.RemoveAt(i);
+
+                    if (MucResults.TryTakeRemove(o.RequestId, out var ok, out var actual))
+                    {
+                        if (ok) rs.MovedItems += actual;   // the amount the OWNER removed, not ours
+                        else { rs.FailedMoves++; rs.FailedItems += o.Amount; }
+                    }
+                    else
+                    {
+                        // Package gone but our postfix saw no response: something other than MUC's
+                        // handler consumed it. Credit the requested amount, but say so in the log -
+                        // an unverified count that grows is a signal, not bookkeeping noise.
+                        rs.MovedItems += o.Amount;
+                        rs.UnverifiedItems += o.Amount;
+                    }
                     continue;
                 }
 
                 if (now >= o.Deadline)
                 {
-                    ReleasePromise(promised, o.Target, o.Amount);
-                    outstanding.RemoveAt(i);
-                    dropped++;
+                    ReleasePromise(rs.Promised, o.Target, o.Amount);
+                    rs.Outstanding.RemoveAt(i);
+                    rs.DroppedRequests++;
                     Plugin.Log.LogWarning("[organize] MUC request " + o.RequestId +
                         " got no response within " + OutstandingDeadline.ToString("0") +
                         " s; releasing our reservation for it");
