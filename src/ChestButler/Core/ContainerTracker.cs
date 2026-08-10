@@ -9,15 +9,33 @@ namespace ChestButler.Core
     {
         private static readonly HashSet<Container> All = new HashSet<Container>();
 
+        /// <summary>Containers that belong to a VEHICLE — a cart bed (Vagon) or a ship's hold. They
+        /// are transport, not storage: the staging soak had Organize filing loot into the owner's
+        /// wagons. Classified once at registration (the parent component never changes) and skipped
+        /// by the accessibility core in BOTH directions unless [Sorting] VehiclesAreStorage is on,
+        /// so the tick, Organize, Pull-sources and Gather all agree. Their own chest UI still works:
+        /// pin a cart and press Pull to LOAD it for a trip, Take All to unload — manual stays manual.</summary>
+        private static readonly HashSet<Container> Vehicles = new HashSet<Container>();
+
         internal static void Register(Container c)
         {
-            if (c != null) All.Add(c);
+            if (c == null) return;
+
+            // The Obliterator's "chest" is a destruction chute — its Container + Piece pass every
+            // generic filter, and routing so much as one stack into it would delete items on the
+            // next lever pull. Never registered, no config, no exceptions.
+            if (c.GetComponentInParent<Incinerator>() != null) return;
+
+            All.Add(c);
+            if (c.GetComponentInParent<Vagon>() != null || c.GetComponentInParent<Ship>() != null)
+                Vehicles.Add(c);
         }
 
         internal static void Unregister(Container c)
         {
             if (c == null) return;
             All.Remove(c);
+            Vehicles.Remove(c);
             Filters.Invalidate(c);   // 1.1.2: the spec cache is keyed by Container and zone unload
                                      // mints a fresh one per chest, so stale keys accumulated forever
                                      // (each pinning a destroyed MonoBehaviour's object graph).
@@ -53,9 +71,12 @@ namespace ChestButler.Core
             var dists = new List<float>();
             var found = new List<Container>();
 
+            bool vehiclesAreStorage = Plugin.VehiclesAreStorage != null && Plugin.VehiclesAreStorage.Value;
+
             foreach (var c in All)
             {
                 if (c == exclude) continue;
+                if (!vehiclesAreStorage && Vehicles.Contains(c)) continue; // transport, not storage
                 if (!SorterZdo.HasValidNView(c)) continue;
                 if (c.GetInventory() == null) continue;
                 if (c.GetComponentInParent<Piece>() == null) continue;   // player-built only

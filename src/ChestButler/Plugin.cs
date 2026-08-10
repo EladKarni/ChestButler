@@ -25,6 +25,7 @@ namespace ChestButler
         internal static ConfigEntry<float> TransferInterval;
         internal static ConfigEntry<int> StacksPerTick;
         internal static ConfigEntry<bool> ContainsFallback;
+        internal static ConfigEntry<bool> VehiclesAreStorage;
 
         // WAVE 0: the [Organize] entries now live in OrganizeConfig so that W1 can add to that
         // section without touching this file, and so no two 2.0 workstreams edit the same region of
@@ -66,6 +67,10 @@ namespace ChestButler
 
             ContainsFallback = Config.Bind("Sorting", "ContainsFallback", true,
                 new ConfigDescription("Route items to chests that already contain them when no explicit filter matches.",
+                    null, new ConfigurationManagerAttributes { IsAdminOnly = true }));
+
+            VehiclesAreStorage = Config.Bind("Sorting", "VehiclesAreStorage", false,
+                new ConfigDescription("Treat cart and ship inventories as storage. Off (default): the sorter, Organize, Pull and Gather all ignore vehicles entirely - they are transport, and their own Pin/Pull buttons still work for manual loading.",
                     null, new ConfigurationManagerAttributes { IsAdminOnly = true }));
 
             Groups.Init(Config);
