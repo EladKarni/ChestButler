@@ -491,6 +491,18 @@ namespace ChestButler.Core
         {
             public UnityMove Move;
             public int Attempts;
+            public Why LastWhy;        // the reason of the most recent Retry/Drop, for the skip breakdown
+            public long LastOwner;     // ZDO owner uid when LastWhy == OwnerHeld
+        }
+
+        /// <summary>Why a move could not be issued right now. Purely diagnostic: two staging rounds
+        /// were spent guessing the dominant skip cause from aggregate counts ("skipped 67", then
+        /// "1045 could not move"), and each guess-fix moved the number without clearing it. The
+        /// executor always knew the reason per move and threw it away; now it is tallied and logged
+        /// so the next fix targets the measured cause, not the plausible one.</summary>
+        private enum Why
+        {
+            None, SrcGone, DeadNView, InFlight, Access, NoRoom, InUse, OwnerHeld
         }
 
         private enum Outcome { Issued, Retry, Drop }
@@ -518,6 +530,11 @@ namespace ChestButler.Core
                 // have already promised each destination for the whole run.
                 var promised = new Dictionary<Container, int>();
                 var outstanding = new List<Outstanding>();
+
+                // Diagnostic tallies for the skip-breakdown line (see Why's doc comment).
+                var skipWhy = new Dictionary<Why, int>();
+                var skipOwners = new Dictionary<long, int>();
+                var skipOwnerDists = new List<float>();
 
                 var queue = new List<Pending>(plan.Moves.Count);
                 foreach (var mv in plan.Moves) queue.Add(new Pending { Move = mv });
@@ -555,7 +572,8 @@ namespace ChestButler.Core
                         int requestId;
                         try
                         {
-                            outcome = TryIssue(pm.Move, promised, out amount, out requestId);
+                            outcome = TryIssue(pm.Move, promised, out amount, out requestId,
+                                               out pm.LastWhy, out pm.LastOwner);
                         }
                         finally
                         {
@@ -589,12 +607,14 @@ namespace ChestButler.Core
                             {
                                 skippedMoves++;
                                 skippedItems += pm.Move.Amount;
+                                TallySkip(pm, skipWhy, skipOwners, skipOwnerDists);
                             }
                         }
                         else
                         {
                             skippedMoves++;
                             skippedItems += pm.Move.Amount;
+                            TallySkip(pm, skipWhy, skipOwners, skipOwnerDists);
                         }
                     }
 
@@ -612,7 +632,12 @@ namespace ChestButler.Core
                             queue = retry;
                             continue;
                         }
-                        foreach (var pm in retry) { skippedMoves++; skippedItems += pm.Move.Amount; }
+                        foreach (var pm in retry)
+                        {
+                            skippedMoves++;
+                            skippedItems += pm.Move.Amount;
+                            TallySkip(pm, skipWhy, skipOwners, skipOwnerDists);
+                        }
                         break;
                     }
                     queue = retry;
@@ -630,6 +655,7 @@ namespace ChestButler.Core
                     " item(s) into " + targetsHit.Count + " chest(s); skipped " + skippedMoves +
                     " move(s) covering " + skippedItems + " item(s); " + droppedRequests +
                     " request(s) timed out; throttle scale " + Throttle.Scale.ToString("0.00"));
+                LogSkipBreakdown(skipWhy, skipOwners, skipOwnerDists);
             }
             finally
             {
@@ -640,39 +666,46 @@ namespace ChestButler.Core
         /// <summary>Live-revalidate a single move and, if it still holds, issue it. Nothing here trusts
         /// the plan: the plan is advisory and the world may have changed since it was built.</summary>
         private static Outcome TryIssue(UnityMove mv, Dictionary<Container, int> promised,
-            out int amount, out int requestId)
+            out int amount, out int requestId, out Why why, out long ownerUid)
         {
             amount = 0;
             requestId = 0;
+            why = Why.None;
+            ownerUid = 0L;
 
             var src = mv.Source;
             var tgt = mv.Target;
             var item = mv.Item;
-            if (src == null || tgt == null || item == null || item.m_shared == null) return Outcome.Drop;
+            if (src == null || tgt == null || item == null || item.m_shared == null)
+            { why = Why.DeadNView; return Outcome.Drop; }
 
             var sInv = src.GetInventory();
             var tInv = tgt.GetInventory();
-            if (sInv == null || tInv == null) return Outcome.Drop;
+            if (sInv == null || tInv == null) { why = Why.DeadNView; return Outcome.Drop; }
 
             // stack gone since the plan was built
-            if (!sInv.GetAllItems().Contains(item)) return Outcome.Drop;
+            if (!sInv.GetAllItems().Contains(item)) { why = Why.SrcGone; return Outcome.Drop; }
 
             // §16.2.4: re-resolve BOTH endpoints. A chest destroyed or unloaded mid-run spills its
             // contents as ground drops on its owner's client, and issuing a remove against that dying
             // ZDO is exactly the window where an item can exist twice.
             var srcNv = SorterZdo.NView(src);
-            if (srcNv == null || !srcNv.IsValid()) return Outcome.Drop;
+            if (srcNv == null || !srcNv.IsValid()) { why = Why.DeadNView; return Outcome.Drop; }
             var tgtNv = SorterZdo.NView(tgt);
-            if (tgtNv == null || !tgtNv.IsValid()) return Outcome.Drop;
+            if (tgtNv == null || !tgtNv.IsValid()) { why = Why.DeadNView; return Outcome.Drop; }
 
             var sBlock = InventoryBlock.Get(sInv);
-            if (sBlock != null && sBlock.IsSlotBlocked(item.m_gridPos)) return Outcome.Retry;
+            if (sBlock != null && sBlock.IsSlotBlocked(item.m_gridPos))
+            { why = Why.InFlight; return Outcome.Retry; }
 
             // §16.2.7: wards and per-container access were plan-time only, so a ward raised mid-run was
             // bypassed via ClaimOwnership + MUC. Re-check both endpoints every time.
-            if (!SorterZdo.PlayerCanAccess(tgt) || !SorterZdo.PlayerCanAccess(src)) return Outcome.Drop;
-            if (!PrivateArea.CheckAccess(tgt.transform.position, 0f, false, true)) return Outcome.Drop;
-            if (!PrivateArea.CheckAccess(src.transform.position, 0f, false, true)) return Outcome.Drop;
+            if (!SorterZdo.PlayerCanAccess(tgt) || !SorterZdo.PlayerCanAccess(src))
+            { why = Why.Access; return Outcome.Drop; }
+            if (!PrivateArea.CheckAccess(tgt.transform.position, 0f, false, true))
+            { why = Why.Access; return Outcome.Drop; }
+            if (!PrivateArea.CheckAccess(src.transform.position, 0f, false, true))
+            { why = Why.Access; return Outcome.Drop; }
 
             // Router.Room answers "can one more fit?" for a non-stackable — it returns 1 whenever the
             // chest has any empty slot at all. That is right for the sorter tick, which moves a single
@@ -684,18 +717,19 @@ namespace ChestButler.Core
                 ? tInv.GetEmptySlots()
                 : Router.Room(tInv, item);
             if (promised.TryGetValue(tgt, out var already)) room -= already;
-            if (room <= 0) return Outcome.Retry;            // may drain later in the run
+            if (room <= 0) { why = Why.NoRoom; return Outcome.Retry; }   // may drain later in the run
 
             amount = Math.Min(mv.Amount, Math.Min(item.m_stack, room));
-            if (amount <= 0) return Outcome.Retry;
+            if (amount <= 0) { why = Why.NoRoom; return Outcome.Retry; }
 
             // §16.2.2: Container.m_inUse is a LOCAL field, so a remote player browsing this chest is
             // invisible to us and the claim below would strand their deposit (vanilla Container.Save
             // is owner-gated). Gate on ZDO ownership instead — that IS networked — and keep the local
             // in-use check as a second signal for chests open on this client.
-            if (tgt.IsInUse()) return Outcome.Retry;
+            if (tgt.IsInUse()) { why = Why.InUse; return Outcome.Retry; }
             long owner = tgtNv.GetZDO().GetOwner();
-            if (owner != 0L && !tgtNv.IsOwner()) return Outcome.Retry;   // someone else holds it
+            if (owner != 0L && !tgtNv.IsOwner())
+            { why = Why.OwnerHeld; ownerUid = owner; return Outcome.Retry; }   // someone else holds it
 
             if (!tgtNv.IsOwner()) tgtNv.ClaimOwnership();
 
@@ -707,6 +741,63 @@ namespace ChestButler.Core
             requestId = request != null ? request.RequestID : 0;
             promised[tgt] = already + amount;
             return Outcome.Issued;
+        }
+
+        private static void TallySkip(Pending pm, Dictionary<Why, int> why,
+            Dictionary<long, int> owners, List<float> ownerDists)
+        {
+            why[pm.LastWhy] = (why.TryGetValue(pm.LastWhy, out var n) ? n : 0) + 1;
+            if (pm.LastWhy != Why.OwnerHeld) return;
+
+            owners[pm.LastOwner] = (owners.TryGetValue(pm.LastOwner, out var o) ? o : 0) + 1;
+            if (Player.m_localPlayer != null && pm.Move.Target != null)
+                ownerDists.Add(Vector3.Distance(Player.m_localPlayer.transform.position,
+                                                pm.Move.Target.transform.position));
+        }
+
+        /// <summary>One greppable line naming every skip cause, plus the identity facts needed to
+        /// interpret OwnerHeld (our session id, the server peer's id, the zone/active-area sizes the
+        /// 128 m radius has been assuming — pre-flight items 1/2, finally answered at runtime).</summary>
+        private static void LogSkipBreakdown(Dictionary<Why, int> why,
+            Dictionary<long, int> owners, List<float> ownerDists)
+        {
+            if (why.Count == 0) return;
+
+            var parts = new List<string>();
+            foreach (var kv in why) parts.Add(kv.Key + "=" + kv.Value);
+
+            var sb = new System.Text.StringBuilder("[organize] skip breakdown: ");
+            sb.Append(string.Join(" ", parts));
+
+            if (owners.Count > 0)
+            {
+                sb.Append(" | owner-held uids:");
+                foreach (var kv in owners) sb.Append(' ').Append(kv.Key).Append('x').Append(kv.Value);
+                long mine = ZDOMan.instance != null ? ZDOMan.GetSessionID() : 0L;
+                sb.Append(" | mine=").Append(mine);
+                try
+                {
+                    var peer = HarmonyLib.AccessTools.Method(typeof(ZNet), "GetServerPeer")
+                        ?.Invoke(ZNet.instance, null) as ZNetPeer;
+                    sb.Append(" server=").Append(peer != null ? peer.m_uid : 0L);
+                }
+                catch { sb.Append(" server=?"); }
+                if (ownerDists.Count > 0)
+                {
+                    ownerDists.Sort();
+                    sb.Append(" | dist m: min=").Append(ownerDists[0].ToString("0"))
+                      .Append(" med=").Append(ownerDists[ownerDists.Count / 2].ToString("0"))
+                      .Append(" max=").Append(ownerDists[ownerDists.Count - 1].ToString("0"));
+                }
+            }
+
+            var zs = ZoneSystem.instance;
+            if (zs != null)
+                sb.Append(" | zoneSize=").Append(zs.m_zoneSize.ToString("0"))
+                  .Append(" activeArea=").Append(zs.m_activeArea)
+                  .Append(" activeDistant=").Append(zs.m_activeDistantArea);
+
+            Plugin.Log.LogInfo(sb.ToString());
         }
 
         /// <summary>How many of our issued requests MUC has not yet answered. A request disappears
