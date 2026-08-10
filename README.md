@@ -56,7 +56,7 @@ This mod adds a "Sorter" toggle to chests. Anything you dump into a sorter chest
 
 It works in the other direction too. You can pin a set of items to a chest and give it a Pull button that grabs those items from nearby storage. I use this for a cooking chest next to the cauldron that restocks itself on demand.
 
-Since 1.1.0, a sorter chest can also **Organize** the whole base in one press: it previews how much would move, then consolidates every item type into its best chest, in place. Routing is station-aware — chests next to a forge attract metals and ores, the smelter chest gets ore and coal, the cauldron chest gets cooking ingredients — with the station map editable in config and modded stations supported via a log-assisted `CustomStations` entry.
+A sorter chest can also **Organize** the whole base in one press: it previews how much would move, then consolidates every item type into its best chest, in place. Since 2.0 the assignment is remembered on the chests, so an organized base stays organized and a follow-up press has nothing to do. Chests next to feed-in processors attract their materials (smelter and blast furnace get ores and fuel, the fermenter gets meads), the map is editable in config, and modded or crafting stations can be added via a log-assisted `CustomStations` entry. There is also a **Gather** button at crafting stations that pulls a recipe's missing ingredients from nearby chests, and signs can label a chest (`sort: wood`), opt it out (`sort: off`), or opt out a whole area (`sort: off` plus a radius line).
 
 Some notes on how it's built: every item transfer goes through MultiUserChest's networking, which means only the actual owner of a chest ever modifies it. This is the part most sorting mods get wrong, and it's why some of them eat items on multiplayer servers. Config lives on the server and syncs to everyone, so the whole group runs the same rules.
 
@@ -134,7 +134,7 @@ The project builds offline. There is no NuGet restore; every reference is a loca
 | Station / smelter / fermenter detection | `Core/Stations.cs`, `Patches/ProcessorPatches.cs` |
 | Item groups | `Core/Groups.cs`, `Core/Names.cs` |
 | Chest UI toolbar | `Patches/GuiPatch.cs` |
-| Planner unit tests (run offline, no game needed) | `tests/OrganizePlannerTests/` — `dotnet run` |
+| Planner unit tests (run offline, no game needed) | `tests/OrganizePlannerTests/` (`dotnet run`) |
 
 One rule matters more than any other in this codebase: never write to an inventory you don't own. All chest-to-chest moves go through MultiUserChest's request/response API, which routes the change to whichever peer owns the target chest. Writing straight into a remote chest's `Inventory` is exactly how the old Smarter Containers mod ended up deleting items, so PRs that bypass this will be rejected.
 
@@ -153,19 +153,21 @@ Buttons show up at the bottom of every chest UI:
 | `Clear` | chests with filters | wipes the saved filters |
 | `Pull` | chests with filters | grabs one stack of each saved item from nearby chests |
 
-Routing picks a target in this order: a chest that names the item, then a chest whose group covers it, then any chest that already holds some. Ties go to higher priority, then to whichever chest holds the most of that item, then to the nearest one. If the best chest only has room for part of a stack it gets topped off and the rest re-routes. Organize uses the same ranking plus a station-adjacency tier (after pins/groups, before most-held), decides one winning chest per item type, and checks capacity slot-accurately at plan time — anything that can no longer move at confirm simply stays put.
+Routing picks a target in this order: a chest that names the item, then a chest whose sign or group covers it, then any chest that already holds some. Ties go to higher priority, then to whichever chest holds the most of that item, then to the nearest one. If the best chest only has room for part of a stack it gets topped off and the rest re-routes. Organize uses the same ranking plus a processor-adjacency tier and the persistent homes of previous runs, decides one winning chest per item type, and checks capacity slot-accurately at plan time. Anything that can no longer move at confirm simply stays put, and the completion message counts only transfers the network confirmed.
 
-Config is in `BepInEx/config/eksolutions.chestbutler.cfg`: sorting radius (128 m default, shared with Organize), tick rate, stacks per tick, the contains fallback, the `[Stations]` map (+ `CustomStations` for modded ones), Organize's `MovesPerTick`/`StationRange`, and all the item groups under `[ItemGroups]`. The server's values win and sync to clients.
+Config is in `BepInEx/config/eksolutions.chestbutler.cfg`: sorting radius (128 m default, shared with Organize), tick rate, stacks per tick, the contains fallback, the `[Stations]` map (+ `CustomStations` for anything else), Organize's `MovesPerSecond`/`MaxMovesPerRun`/`StationRange`/`IncludeGear`/`MiscPromoteSlots`, the `[Gather]` toggles, and all the item groups under `[ItemGroups]`. The server's values win and sync to clients.
 
 
 
 <!-- ROADMAP -->
 ## Roadmap
 
+* [x] Gamepad support for the chest UI toolbar (2.0)
+* [x] Craftable dedicated Sorter Chest piece (2.0)
+* [ ] Sorter Chest build-menu placement and icon polish (2.1)
+* [ ] A "keep" concept: protect curated quantities without claiming the whole type (2.1)
 * [ ] Transfer VFX/SFX on chests
-* [ ] Gamepad support for the chest UI toolbar
 * [ ] Filter editor panel (view and remove individual pinned items, group checkboxes)
-* [ ] Craftable dedicated Sorter Chest piece
 * [ ] Localization
 * [ ] Valheim 1.0 ("Deep North", Sept 2026) compatibility pass
 
