@@ -1229,6 +1229,44 @@ internal static class Program
                 "one write: the stale marker is overwritten with the adopter's own (chest 2 -> ores)");
         }
 
+        // 35) The sign grammar, incl. the area-off rule: "sort: off" + a number (own line or bare
+        //     token) = every chest within that many metres of the sign is ignored. The number is
+        //     inert without off (historical behaviour: an unmatchable item token), so no existing
+        //     sign changes meaning.
+        Console.WriteLine("[35] sign grammar: classic tokens + area-off radius");
+        {
+            var classic = SignGrammar.Parse("sort: cooking, trophy*, p2, off");
+            Check(classic.HasOff && classic.AreaOffRadius == 0f,
+                "classic 'off' parses with no area radius");
+            Check(classic.Tokens.Count == 3 && classic.Tokens.Contains("cooking")
+                  && classic.Tokens.Contains("trophy*") && classic.Tokens.Contains("p2"),
+                "group/wildcard/priority tokens survive unchanged");
+
+            var twoLine = SignGrammar.Parse("sort: off\n10");
+            Check(twoLine.HasOff && twoLine.AreaOffRadius == 10f,
+                "the owner's form: 'sort: off' + '10' on its own line = 10 m area");
+
+            var oneLine = SignGrammar.Parse("sort: off, 12.5");
+            Check(oneLine.HasOff && oneLine.AreaOffRadius == 12.5f,
+                "single-line 'sort: off, 12.5' works too");
+
+            var reversed = SignGrammar.Parse("15\nsort: ignore");
+            Check(reversed.HasOff && reversed.AreaOffRadius == 15f,
+                "line order does not matter, and 'ignore' counts as off");
+
+            var noOff = SignGrammar.Parse("sort: wood\n42");
+            Check(!noOff.HasOff && noOff.AreaOffRadius == 0f && noOff.Tokens.Contains("wood"),
+                "a number without off is inert - no area, sign still labels wood");
+
+            var clamped = SignGrammar.Parse("sort: off\n500");
+            Check(clamped.AreaOffRadius == SignGrammar.MaxAreaRadius,
+                "radius clamps to MaxAreaRadius so one sign cannot disable a neighbourhood");
+
+            var junk = SignGrammar.Parse("Bjorn's vault!\nsort: off\n-5\n0\nkeep out");
+            Check(junk.HasOff && junk.AreaOffRadius == 0f,
+                "prose lines and non-positive numbers are ignored; off stays single-chest");
+        }
+
         Console.WriteLine("================================");
         Console.WriteLine($"RESULT: {_passed} passed, {_failed} failed");
         return _failed == 0 ? 0 : 1;
