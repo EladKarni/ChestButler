@@ -135,6 +135,6 @@ jobs:
           version: ${{ steps.ver.outputs.version }}
           community: valheim
           repo: https://thunderstore.io
-          description: "Dump-and-sort chests: flag a chest as a Sorter and loot flies to the right chests. One-press Organize tidies the whole base and remembers each chest's role. Gather pulls recipe ingredients to the bench. Sign filters, area-off. Multiplayer-safe via MultiUserChest."
+          description: "Dump-and-sort chests: flag a chest as a Sorter and loot flies to the right chests. One-press Organize tidies the whole base and remembers each chest's role. Gather pulls recipe ingredients to the bench. Multiplayer-safe via MultiUserChest."
           file: ChestButler-${{ steps.ver.outputs.version }}.zip
           token: ${{ secrets.TCLI_AUTH_TOKEN }}
