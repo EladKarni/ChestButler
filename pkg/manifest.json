@@ -1,8 +1,8 @@
 {
   "name": "ChestButler",
-  "version_number": "1.1.2",
+  "version_number": "2.0.0",
   "website_url": "",
-  "description": "Dump-and-sort chests: flag a chest as a Sorter and loot flies to the right chests. One-press Organize tidies the whole base, station-aware: metals by the forge, ore+coal by the smelter. Pin filters, Pull restock. Multiplayer-safe via MultiUserChest.",
+  "description": "Dump-and-sort chests: flag a chest as a Sorter and loot flies to the right chests. One-press Organize tidies the whole base and remembers each chest's role. Gather pulls recipe ingredients to the bench. Sign filters, area-off. Multiplayer-safe via MultiUserChest.",
   "dependencies": [
     "denikson-BepInExPack_Valheim-5.4.2333",
     "ValheimModding-Jotunn-2.29.2",

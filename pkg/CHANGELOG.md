@@ -1,5 +1,36 @@
 # Changelog
 
+## 2.0.0
+
+The base-management release. Organize is now a whole-base allocator with persistent homes, a **Gather** button pulls recipe ingredients to you at the crafting station, a craftable **Sorter Chest** joins the build menu, and signs can protect whole areas. **Server and all clients must update together.** A 2.0 server refuses 1.1.x clients (and the other way around) with a clear message at connect.
+
+**Organize v2: whole-base, volume-aware**
+- Every item type is classified into a bucket (groups, pinned types, gear, misc) and buckets claim chest space by volume, anchored by pins, signs, adjacent processors, and the homes of previous runs. 1.1.x just sent things wherever most of them already sat.
+- Homes persist on the chests themselves. A second press moves little or nothing, and established chests keep their role between runs. A category only relocates when it has outgrown its chest and a nearer one fits all of it.
+- Weapons, armor and tools are organized into their own homes by default now. Set `[Organize] IncludeGear = false` to restore the 1.1.x leave-gear-alone behavior.
+- Small leftovers fold into a shared misc home instead of claiming a whole chest per item type (`MiscPromoteSlots`).
+- The completion message counts only transfers the network actually confirmed, never what was merely attempted.
+- Dedicated-server correctness: chests that no peer owns are claimed before moving items out of them (those moves previously did nothing, silently, which is why Organize could take 3-4 presses), declined or failed transfers are retried or reported by name in the log, and a big base converges in two presses. Verified on a 5,838-item base: press 2 swept 15 items, press 3 found nothing to do.
+
+**Gather** *(new)*
+- A **Gather** button under Craft pulls the selected recipe's missing ingredients from chests in range, scaled to the craft multiplier.
+- Green `(N)` counts show what storage holds. Greyed out means you already carry what the recipe needs; it re-arms as crafting consumes materials.
+
+**Sorter Chest** *(new)*
+- A craftable chest that is a Sorter out of the box. It sits at the end of the Furniture tab for now (grouping and a distinct icon come in 2.1).
+- Rollback caveat: it is a custom prefab, so removing the mod (or rolling back to 1.1.x) deletes placed Sorter Chests from the world. Toggled vanilla chests are unaffected.
+
+**Signs: area-off and priorities**
+- `sort: <groups or item names>` on a sign binds the nearest chest, `pN` sets its priority, and `sort: off` excludes it, same as before.
+- New: add a number on its own line (or after `off`) and the off applies to every chest within that many meters of the sign, up to 32. One sign protects a whole room.
+
+**Breaking / behavior changes**
+- **Station adjacency is now feed-in processors only.** Smelter, blast furnace and fermenter attract their materials; forge, workbench, cauldron and the other crafting stations no longer do. With Gather, materials no longer need to live beside the bench: you fetch exactly what a recipe needs and return leftovers via a Sorter chest. Any station can be re-added in config, for example `CustomStations = $piece_forge=metals,ores`. Upgrading servers lose crafting-station attraction automatically (the stored `[Stations]` lines for removed defaults become inert).
+- **Curated chests need protection before your first Organize.** A hand-picked mixed chest (a meals chest, an adventure kit) is reorganized like everything else unless a `sort: off` sign protects it. See the README's "Before your first Organize" section.
+- Carts and ships are transport, not storage. The sorter, Organize, Gather and Pull all ignore vehicle inventories (`VehiclesAreStorage` restores the old behavior). The Obliterator is no longer a valid target for anything.
+- `[Organize] MovesPerTick` (per-frame) is replaced by `MovesPerSecond` (default 25) and `MaxMovesPerRun` (default 500). An old stored key is ignored.
+- Controller users: ChestButler's buttons are now reachable on gamepad.
+
 ## 1.1.2
 Maintenance release: correctness and performance fixes found by a full source audit. No new features, no config migration needed. Cross-compatible with 1.1.x, so it deploys as a normal patch.
 
