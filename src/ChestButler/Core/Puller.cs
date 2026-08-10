@@ -33,6 +33,11 @@ namespace ChestButler.Core
 
             foreach (var src in sources)
             {
+                // sort: off means leave this chest entirely alone - Gatherer and Organize already
+                // honor that on the source side; Pull was the one reader that did not (audit,
+                // 2.0.0 release). Without this, a neighbour's Pull drains a protected chest.
+                if (Filters.GetSpec(src).Ignore) continue;
+
                 var sinv = src.GetInventory();
                 var sblock = InventoryBlock.Get(sinv);
 

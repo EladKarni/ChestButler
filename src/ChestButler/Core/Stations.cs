@@ -109,8 +109,9 @@ namespace ChestButler.Core
                         null, new ConfigurationManagerAttributes { IsAdminOnly = true }));
             }
             Extra = config.Bind("Stations", "CustomStations", "",
-                new ConfigDescription("Extra mappings for modded/unlisted stations. Format: 'token=group1,group2; token2=group3'. " +
-                    "Copy a station's token from the log (Info) after pressing Organize, e.g. '$piece_blacksmith=metals,ores'.",
+                new ConfigDescription("Extra mappings for crafting or modded stations. Format: 'token=group1,group2; token2=group3'. " +
+                    "The token is the station piece's name id, e.g. '$piece_forge=metals,ores' restores forge attraction; " +
+                    "'$piece_workbench', '$piece_cauldron' and '$piece_artisanstation' are the other common ones.",
                     null, new ConfigurationManagerAttributes { IsAdminOnly = true }));
 
             config.SettingChanged += (_, __) => Rebuild();

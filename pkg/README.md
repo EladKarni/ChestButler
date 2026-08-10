@@ -11,7 +11,7 @@ Toggle any chest into a dump chest with one button, or build the craftable **Sor
 Sorter chests get an **Organize** button. One press scans every chest in range and previews what would move. Press again and every item type consolidates into its best home, in place, while you carry nothing. Homes persist: chests keep their assigned role between runs, so a tidy base stays tidy and a second press right after the first has little or nothing left to do. Weapons, armor and tools get homes of their own, and small odds and ends share a misc chest instead of each claiming their own.
 
 **Gather at the crafting station** *(new in 2.0)*
-A **Gather** button under Craft pulls the selected recipe's missing ingredients from chests in range, scaled to your craft multiplier. Green `(N)` counts show what storage holds. Craft, then dump what's left into a Sorter chest and it flows back to where it belongs.
+A **Gather** button under Craft pulls the selected recipe's missing ingredients from chests in range, scaled to your craft multiplier. Green `(N)` counts show what storage holds. Craft, then dump what's left into a Sorter chest and it flows back to where it belongs. Greyed out means there is nothing to fetch: you already carry what the recipe needs, or storage has none of what is missing.
 
 **Sign control, now with areas** *(area-off new in 2.0)*
 A sign next to a chest labels it: `sort: wood` claims a group, `sort: off` opts the chest out entirely. New in 2.0: add a number on its own line and the `off` covers every chest within that radius. One sign protects a whole room.
@@ -93,7 +93,7 @@ And in the crafting panel:
 
 | Button | Where | What it does |
 | ------ | ----- | ------------ |
-| `Gather (N)` | under Craft | pulls the selected recipe's missing ingredients from chests in range; `(N)` per ingredient shows what storage holds. Greyed out means you already carry what the recipe needs (it re-arms as crafting consumes materials) |
+| `Gather (N)` | under Craft | pulls the selected recipe's missing ingredients from chests in range; `(N)` per ingredient shows what storage holds. Greyed out means there is nothing to fetch, either because you already carry what the recipe needs or because storage has none of what is missing (it re-arms as crafting consumes materials) |
 
 ### Signs
 
@@ -111,11 +111,11 @@ Group names and item names (wildcards allowed) both work as tokens. A number lin
 
 ### How a target chest is picked
 
-For each item, in order: a chest that pins the item wins first, then a chest whose sign or group covers it, then (during Organize) a chest next to a mapped processor, then an established home from a previous run, then any chest that already contains some. Ties go to higher sign priority, then to the chest holding the most of that item, then to the nearest one.
+For each item, in order: a chest that pins the item wins first, then a chest whose sign or group covers it, then a chest next to a mapped processor, then (during Organize) an established home from a previous run, then any chest that already contains some. Ties go to higher sign priority, then for live sorting to the chest holding the most of that item, then to the nearest one; Organize breaks its ties by anchor strength and distance instead, so an organized base does not churn.
 
 ### Organize: one-press base cleanup
 
-Each item type gets exactly one winning home, chests are claimed by volume, and the assignment is remembered on the chests. The next Organize keeps established homes in place instead of reshuffling. A category only relocates when it has outgrown its chest and a nearer chest can hold all of it.
+Each item type gets exactly one winning home, chests are claimed by volume, and the assignment is remembered on the chests. The next Organize keeps established homes in place instead of reshuffling. A category can still move if it no longer fits its chest.
 
 Default station map (editable in config under `[Stations]`), feed-in processors only since 2.0:
 
@@ -136,7 +136,7 @@ Good to know:
 
 ## Configuration
 
-The config file is `BepInEx/config/eksolutions.chestbutler.cfg`, generated on first launch. On a server, the server's values are authoritative and sync to all clients (the two speed knobs below marked *client-side* are each player's own).
+The config file is `BepInEx/config/eksolutions.chestbutler.cfg`, generated on first launch. On a server, the server's values are authoritative and sync to all clients for everything that changes the outcome (radius, groups, stations, Organize behavior). The keys marked *client-side* below only change speed or UI on your own screen, so each player controls their own.
 
 | Setting | Default | Description |
 | ------- | ------- | ----------- |
@@ -145,17 +145,17 @@ The config file is `BepInEx/config/eksolutions.chestbutler.cfg`, generated on fi
 | [Sorting] StacksPerTick | 2 | item stacks moved per tick (1 to 8), *client-side* |
 | [Sorting] ContainsFallback | true | route items to chests that already contain them when no filter matches |
 | [Sorting] VehiclesAreStorage | false | treat cart and ship inventories as storage again |
-| [Organize] MovesPerSecond | 25 | transfer rate while an Organize run executes |
-| [Organize] MaxMovesPerRun | 500 | safety cap per run; the message tells you to press again if it was hit |
+| [Organize] MovesPerSecond | 25 | transfer rate while an Organize run executes, *client-side* |
+| [Organize] MaxMovesPerRun | 500 | safety cap per run; the message tells you to press again if it was hit, *client-side* |
 | [Organize] StationRange | 8 | how close (meters) a chest must be to a station to inherit its materials (1 to 20) |
 | [Organize] IncludeGear | true | give weapons/armor/tools their own homes during Organize |
 | [Organize] MiscPromoteSlots | 24 | an unlisted item type gets its own chest only above this volume; below it, it shares the misc home |
-| [Gather] Enabled | true | show the Gather button |
-| [Gather] ShowStorageCounts | true | show the green (N) storage counts in the recipe list |
+| [Gather] Enabled | true | show the Gather button, *client-side* |
+| [Gather] ShowStorageCounts | true | show the green (N) storage counts in the recipe list, *client-side* |
 
 The `[ItemGroups]` section defines the item groups: stone, wood, ores, metals, cooking, meat, seeds, trophies, valuables, meads, ammo, hides, fuel. Every group is a comma separated list of item name tokens (wildcards allowed).
 
-The `[Stations]` section maps processors to the groups they attract during Organize. For anything else, crafting stations you want back or modded stations, use `CustomStations` with the format `token=group1,group2; token2=group3`. The exact token is printed to `BepInEx/LogOutput.log` whenever a chest's nearest station has no mapping.
+The `[Stations]` section maps processors to the groups they attract during Organize. For anything else, crafting stations you want back or modded stations, use `CustomStations` with the format `token=group1,group2; token2=group3`. The token is the station piece's name id: `$piece_forge`, `$piece_workbench`, `$piece_cauldron` and `$piece_artisanstation` are the common vanilla ones, and a modded station's token is in that mod's documentation or config.
 
 **Upgrading from 1.1.x:** stored `[Stations]` lines for the removed crafting-station defaults become inert automatically, and the old `[Organize] MovesPerTick` key is ignored (replaced by `MovesPerSecond`). No manual migration needed.
 
@@ -176,7 +176,7 @@ No. An item never exists in two places: each move is packed into a request, exec
 Working as designed, unfortunately. Organize can't tell a curated mixed chest from clutter, so protect it first (see **Before your first Organize** above). Established single-type chests are safe, since homes persist between runs.
 
 **Gather is greyed out.**
-Greyed means you already carry everything the selected recipe needs at the current multiplier. It re-arms by itself as crafting consumes your materials.
+Greyed means there is nothing to fetch. Either you already carry everything the selected recipe needs at the current multiplier, or the chests in range hold none of what is missing. It re-arms by itself as crafting consumes your materials.
 
 **I pressed Organize and nothing moved.**
 The first press is a preview. The button turns into `Confirm?` and a second press within 5 seconds runs it. "Nothing to organize" means every item is already in its home. Organize never moves an item to a random chest.
@@ -188,7 +188,7 @@ Hammer, Furniture tab, near the end. (It gets a proper spot next to the vanilla 
 Mostly yes: sorter flags, pins and homes are stored on the chests and are simply ignored without the mod. The one exception is the **Sorter Chest piece**. It is a custom prefab, and the game deletes placed ones (with contents) on load if the mod is missing. Empty them first.
 
 **My chest next to the smelter does not attract anything.**
-The chest must be within 8 m of the station (`StationRange`). After pressing Organize, `BepInEx/LogOutput.log` names each chest's nearest station; a "has NO [Stations] mapping" line means it needs a `CustomStations` entry. Windmills cannot be detected at all (the game gives them no station identity), so pin a chest for barley and flour instead.
+The chest must be within 8 m of the station (`StationRange`). If the station is not one of the three mapped processors, it needs a `CustomStations` entry (see Configuration above). Windmills cannot be detected at all (the game gives them no station identity), so pin a chest for barley and flour instead.
 
 **My item will not route into a group chest.**
 Group lists match item names. Some items have internal names that differ from the display name; pin a sample of the item once and the pinned name shown in the message is the exact token to use in the config groups.
