@@ -47,7 +47,17 @@ namespace ChestButler.Core
         /// <summary>§16.2.5: the retry queue needs a termination rule. Two attempts per move, and the
         /// whole queue is abandoned as soon as a full drain issues nothing — which is what stops the
         /// three non-terminating generators (NG+ mixed-worldLevel stacks that can never merge, a
-        /// two-chest eviction cycle with no spare slot, and a target a player leaves open).</summary>
+        /// two-chest eviction cycle with no spare slot, and a target a player leaves open).
+        ///
+        /// DEDICATED-SERVER AMENDMENT (found on the staging soak, not reachable single-player): both
+        /// rules implicitly assumed moves apply the moment they are issued. Over a network they do
+        /// not — an eviction's MUC response takes a round-trip, so a fill into the same chest sees
+        /// "no room" until the response lands. A Retry therefore only consumes an attempt, and an
+        /// empty drain only abandons the queue, when nothing of ours is still in flight; while
+        /// requests are outstanding we wait for them instead. Termination is preserved by the
+        /// OutstandingDeadline sweep: in-flight can only stay non-zero for that long, after which
+        /// the settled-state rules above apply unchanged. Before this, a 219-move plan on the
+        /// staging server issued 152 and skipped 67, converging only across 4 presses.</summary>
         private const int MaxAttemptsPerMove = 2;
 
         /// <summary>§16.3: cap outstanding MUC requests and give each a deadline. MUC's own
@@ -566,9 +576,20 @@ namespace ChestButler.Core
                                     Deadline = Time.realtimeSinceStartup + OutstandingDeadline,
                                 });
                         }
-                        else if (outcome == Outcome.Retry && ++pm.Attempts < MaxAttemptsPerMove)
+                        else if (outcome == Outcome.Retry)
                         {
-                            retry.Add(pm);
+                            // A Retry while our own requests are in flight is not evidence of anything
+                            // — the eviction that frees this move's room may simply not have echoed
+                            // back yet — so it costs no attempt. Only a Retry against a settled world
+                            // counts toward MaxAttemptsPerMove.
+                            bool settled = CountOutstanding(outstanding, ref droppedRequests) == 0;
+                            if (!settled || ++pm.Attempts < MaxAttemptsPerMove)
+                                retry.Add(pm);
+                            else
+                            {
+                                skippedMoves++;
+                                skippedItems += pm.Move.Amount;
+                            }
                         }
                         else
                         {
@@ -577,9 +598,20 @@ namespace ChestButler.Core
                         }
                     }
 
-                    // §16.2.5 termination: a full drain that issued nothing will never issue anything.
+                    // §16.2.5 termination: a full drain that issued nothing will never issue anything
+                    // — once the world is settled. With responses still in flight, wait for them and
+                    // drain again: on a dedicated server "issued nothing" usually just means "the
+                    // network has not caught up", and abandoning here is what made Organize need 3-4
+                    // presses. The OutstandingDeadline sweep bounds the wait.
                     if (issuedThisDrain == 0)
                     {
+                        if (CountOutstanding(outstanding, ref droppedRequests) > 0)
+                        {
+                            while (CountOutstanding(outstanding, ref droppedRequests) > 0)
+                                yield return null;
+                            queue = retry;
+                            continue;
+                        }
                         foreach (var pm in retry) { skippedMoves++; skippedItems += pm.Move.Amount; }
                         break;
                     }
