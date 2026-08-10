@@ -512,6 +512,8 @@ namespace ChestButler.Core
         {
             public int RequestId;
             public float Deadline;
+            public Container Target;   // whose promise to release when this request completes
+            public int Amount;
         }
 
         private static IEnumerator Run(OrganizePlan plan)
@@ -563,7 +565,7 @@ namespace ChestButler.Core
                         }
 
                         // ---- backpressure: our own ledger, not InventoryBlock (§15.6) --------------
-                        while (CountOutstanding(outstanding, ref droppedRequests) >= MaxOutstanding)
+                        while (CountOutstanding(outstanding, promised, ref droppedRequests) >= MaxOutstanding)
                             yield return null;
 
                         var timer = Throttle.Measure();
@@ -592,7 +594,15 @@ namespace ChestButler.Core
                                 {
                                     RequestId = requestId,
                                     Deadline = Time.realtimeSinceStartup + OutstandingDeadline,
+                                    Target = pm.Move.Target,
+                                    Amount = amount,
                                 });
+                            else
+                                // Applied synchronously (or MUC declined): either way the target's
+                                // local inventory is already authoritative, so the promise would
+                                // double-count from this very frame. Release it now - there is no
+                                // outstanding entry to release it later.
+                                ReleasePromise(promised, pm.Move.Target, amount);
                         }
                         else if (outcome == Outcome.Retry)
                         {
@@ -600,7 +610,7 @@ namespace ChestButler.Core
                             // — the eviction that frees this move's room may simply not have echoed
                             // back yet — so it costs no attempt. Only a Retry against a settled world
                             // counts toward MaxAttemptsPerMove.
-                            bool settled = CountOutstanding(outstanding, ref droppedRequests) == 0;
+                            bool settled = CountOutstanding(outstanding, promised, ref droppedRequests) == 0;
                             if (!settled || ++pm.Attempts < MaxAttemptsPerMove)
                                 retry.Add(pm);
                             else
@@ -625,9 +635,9 @@ namespace ChestButler.Core
                     // presses. The OutstandingDeadline sweep bounds the wait.
                     if (issuedThisDrain == 0)
                     {
-                        if (CountOutstanding(outstanding, ref droppedRequests) > 0)
+                        if (CountOutstanding(outstanding, promised, ref droppedRequests) > 0)
                         {
-                            while (CountOutstanding(outstanding, ref droppedRequests) > 0)
+                            while (CountOutstanding(outstanding, promised, ref droppedRequests) > 0)
                                 yield return null;
                             queue = retry;
                             continue;
@@ -646,7 +656,7 @@ namespace ChestButler.Core
                 // Let the tail of the queue settle so the "still outstanding" number is meaningful.
                 float waitUntil = Time.realtimeSinceStartup + 1.5f;
                 while (Time.realtimeSinceStartup < waitUntil &&
-                       CountOutstanding(outstanding, ref droppedRequests) > 0)
+                       CountOutstanding(outstanding, promised, ref droppedRequests) > 0)
                     yield return null;
 
                 Report(movedItems, targetsHit.Count, skippedItems, plan.Summary.HomelessItems,
@@ -803,8 +813,19 @@ namespace ChestButler.Core
         /// <summary>How many of our issued requests MUC has not yet answered. A request disappears
         /// from PackageHandler when its response is processed, so this is a real completion signal —
         /// and one that needs no patch into MUC. Requests past their deadline are released with a log
-        /// line, because MUC has no timeout or sweep of its own (§15.6).</summary>
-        private static int CountOutstanding(List<Outstanding> outstanding, ref int dropped)
+        /// line, because MUC has no timeout or sweep of its own (§15.6).
+        ///
+        /// THE PROMISE IS RELEASED HERE, and that is the fix the skip-breakdown diagnostic bought:
+        /// the measured cause of "1170 could not move" was NoRoom=all at a fully SETTLED state -
+        /// not ownership, not in-flight lag. `promised` reserves a destination's space when a move
+        /// is ISSUED, but once the response lands the target's local inventory already contains
+        /// those items, so Router.Room has shrunk by them - and the never-released promise then
+        /// subtracted them AGAIN. Every landed move poisoned the ledger against every later move
+        /// into the same chest; big bases hit the margin constantly, small drills never did. The
+        /// deadline branch below even logged "releasing our reservation" while releasing nothing.
+        /// Now a promise lives exactly as long as its request: completion or deadline frees it.</summary>
+        private static int CountOutstanding(List<Outstanding> outstanding,
+            Dictionary<Container, int> promised, ref int dropped)
         {
             float now = Time.realtimeSinceStartup;
             int live = 0;
@@ -812,10 +833,16 @@ namespace ChestButler.Core
             {
                 var o = outstanding[i];
                 bool stillQueued = PackageHandler.GetPackage<RequestChestRemove>(o.RequestId, out var pkg) && pkg != null;
-                if (!stillQueued) { outstanding.RemoveAt(i); continue; }
+                if (!stillQueued)
+                {
+                    ReleasePromise(promised, o.Target, o.Amount);
+                    outstanding.RemoveAt(i);
+                    continue;
+                }
 
                 if (now >= o.Deadline)
                 {
+                    ReleasePromise(promised, o.Target, o.Amount);
                     outstanding.RemoveAt(i);
                     dropped++;
                     Plugin.Log.LogWarning("[organize] MUC request " + o.RequestId +
@@ -826,6 +853,13 @@ namespace ChestButler.Core
                 live++;
             }
             return live;
+        }
+
+        private static void ReleasePromise(Dictionary<Container, int> promised, Container target, int amount)
+        {
+            if (target == null || promised == null) return;
+            if (!promised.TryGetValue(target, out var held)) return;
+            promised[target] = Math.Max(0, held - amount);
         }
 
         private static void Report(int movedItems, int chests, int skippedItems, int homeless,
