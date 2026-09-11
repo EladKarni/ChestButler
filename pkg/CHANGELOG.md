@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.1.0
+
+Valheim 1.0 support. Server and all clients have to update together, a 2.1 server won't let 2.0 clients in.
+
+- works on Valheim 1.0.7
+- needs MultiUserChest 0.6.2, the 1.0 fix for it. Mod managers still pull 0.6.1 until that's released, and 0.6.1 breaks chests on 1.0 even without this mod. There's an unofficial 0.6.2 here in the meantime: https://github.com/EladKarni/No-Chest-Block/releases/tag/v0.6.2-valheim1.0
+- needs BepInExPack 5.4.2350 and Jotunn 2.30.0
+- fixed the Organize skip report. It read two active area values that 1.0 removed, so on 1.0 it threw the first time Organize had anything to skip. It now reports how many of the skipped chests are outside the active area instead
+
 ## 2.0.0
 
 The base-management release. Organize is now a whole-base allocator with persistent homes, a **Gather** button pulls recipe ingredients to you at the crafting station, a craftable **Sorter Chest** joins the build menu, and signs can protect whole areas. **Server and all clients must update together.** A 2.0 server refuses 1.1.x clients (and the other way around) with a clear message at connect.

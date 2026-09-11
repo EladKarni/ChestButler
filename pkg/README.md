@@ -73,7 +73,7 @@ BepInEx/
 
 ### Multiplayer and dedicated servers
 
-The mod must be installed on the server and on every client, at the same version. 2.0 and 1.1.x cannot mix; anyone mismatched gets a clear message at connect telling them what to fix. Crossplay must be disabled; modded servers are Steam only.
+The mod must be installed on the server and on every client, at the same version. 2.1 can't mix with 2.0 or 1.1.x, anyone mismatched gets a message at connect telling them what to fix. Crossplay has to be off, modded servers are Steam only.
 
 On a managed host (for example CubeCoders AMP): enable the BepInEx option in the instance configuration, then upload `ChestButler.dll`, `Jotunn.dll` and `MultiUserChest.dll` to `BepInEx/plugins/` via the file manager.
 

@@ -169,7 +169,7 @@ Config is in `BepInEx/config/eksolutions.chestbutler.cfg`: sorting radius (128 m
 * [ ] Transfer VFX/SFX on chests
 * [ ] Filter editor panel (view and remove individual pinned items, group checkboxes)
 * [ ] Localization
-* [ ] Valheim 1.0 ("Deep North", Sept 2026) compatibility pass
+* [x] Valheim 1.0 ("Deep North", Sept 2026) compatibility pass (2.1)
 
 See the [open issues](https://github.com/EladKarni/ChestButler/issues) for the full list.
 
