@@ -4,8 +4,8 @@
   "website_url": "",
   "description": "Dump-and-sort chests: flag a chest as a Sorter and loot flies to the right chests. One-press Organize tidies the whole base and remembers each chest's role. Gather pulls recipe ingredients to the bench. Multiplayer-safe via MultiUserChest.",
   "dependencies": [
-    "denikson-BepInExPack_Valheim-5.4.2333",
-    "ValheimModding-Jotunn-2.29.2",
+    "denikson-BepInExPack_Valheim-5.4.2350",
+    "ValheimModding-Jotunn-2.30.0",
     "MSchmoecker-MultiUserChest-0.6.1"
   ]
 }

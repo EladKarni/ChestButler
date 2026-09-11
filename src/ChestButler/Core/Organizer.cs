@@ -563,6 +563,10 @@ namespace ChestButler.Core
                 var skipWhy = new Dictionary<Why, int>();
                 var skipOwners = new Dictionary<long, int>();
                 var skipOwnerDists = new List<float>();
+                // 1.0: ZoneSystem no longer exposes m_activeArea/m_activeDistantArea, so the active area
+                // is reported as a COUNT of owner-held targets that sit outside it (ZNetScene answers
+                // per position now) instead of as a radius in zones.
+                int skipOutsideActive = 0;
 
                 var queue = new List<Pending>(plan.Moves.Count);
                 foreach (var mv in plan.Moves) queue.Add(new Pending { Move = mv });
@@ -650,14 +654,14 @@ namespace ChestButler.Core
                             {
                                 skippedMoves++;
                                 skippedItems += pm.Move.Amount;
-                                TallySkip(pm, skipWhy, skipOwners, skipOwnerDists);
+                                TallySkip(pm, skipWhy, skipOwners, skipOwnerDists, ref skipOutsideActive);
                             }
                         }
                         else
                         {
                             skippedMoves++;
                             skippedItems += pm.Move.Amount;
-                            TallySkip(pm, skipWhy, skipOwners, skipOwnerDists);
+                            TallySkip(pm, skipWhy, skipOwners, skipOwnerDists, ref skipOutsideActive);
                         }
                     }
 
@@ -679,7 +683,7 @@ namespace ChestButler.Core
                         {
                             skippedMoves++;
                             skippedItems += pm.Move.Amount;
-                            TallySkip(pm, skipWhy, skipOwners, skipOwnerDists);
+                            TallySkip(pm, skipWhy, skipOwners, skipOwnerDists, ref skipOutsideActive);
                         }
                         break;
                     }
@@ -708,7 +712,7 @@ namespace ChestButler.Core
                     rs.DroppedRequests + " request(s) timed out" +
                     (rs.UnverifiedItems > 0 ? "; " + rs.UnverifiedItems + " item(s) unverified" : "") +
                     "; throttle scale " + Throttle.Scale.ToString("0.00"));
-                LogSkipBreakdown(skipWhy, skipOwners, skipOwnerDists);
+                LogSkipBreakdown(skipWhy, skipOwners, skipOwnerDists, skipOutsideActive);
             }
             finally
             {
@@ -814,7 +818,7 @@ namespace ChestButler.Core
         }
 
         private static void TallySkip(Pending pm, Dictionary<Why, int> why,
-            Dictionary<long, int> owners, List<float> ownerDists)
+            Dictionary<long, int> owners, List<float> ownerDists, ref int outsideActive)
         {
             why[pm.LastWhy] = (why.TryGetValue(pm.LastWhy, out var n) ? n : 0) + 1;
             if (pm.LastWhy != Why.OwnerHeld) return;
@@ -823,13 +827,24 @@ namespace ChestButler.Core
             if (Player.m_localPlayer != null && pm.Move.Target != null)
                 ownerDists.Add(Vector3.Distance(Player.m_localPlayer.transform.position,
                                                 pm.Move.Target.transform.position));
+
+            // 1.0 replaces the two active-area radii with a per-position test on ZNetScene. A target
+            // outside the active area is one our client cannot own, which is the whole reason the
+            // radii were logged.
+            if (pm.Move.Target != null && ZNetScene.instance != null &&
+                ZNetScene.instance.OutsideActiveArea(pm.Move.Target.transform.position))
+                outsideActive++;
         }
 
         /// <summary>One greppable line naming every skip cause, plus the identity facts needed to
-        /// interpret OwnerHeld (our session id, the server peer's id, the zone/active-area sizes the
-        /// 128 m radius has been assuming — pre-flight items 1/2, finally answered at runtime).</summary>
+        /// interpret OwnerHeld (our session id, the server peer's id, and how the 128 m radius sits against
+        /// the zone and active-area sizes — pre-flight items 1/2, finally answered at runtime).
+        ///
+        /// 1.0 dropped ZoneSystem.m_activeArea/m_activeDistantArea, so the active area is reported as
+        /// the number of owner-held targets outside it rather than as a radius in zones — the same
+        /// question, asked the way 1.0 answers it.</summary>
         private static void LogSkipBreakdown(Dictionary<Why, int> why,
-            Dictionary<long, int> owners, List<float> ownerDists)
+            Dictionary<long, int> owners, List<float> ownerDists, int outsideActive)
         {
             if (why.Count == 0) return;
 
@@ -864,8 +879,8 @@ namespace ChestButler.Core
             var zs = ZoneSystem.instance;
             if (zs != null)
                 sb.Append(" | zoneSize=").Append(zs.m_zoneSize.ToString("0"))
-                  .Append(" activeArea=").Append(zs.m_activeArea)
-                  .Append(" activeDistant=").Append(zs.m_activeDistantArea);
+                  .Append(" activeAreaLoaded=").Append(zs.IsActiveAreaLoaded())
+                  .Append(" outsideActiveArea=").Append(outsideActive);
 
             Plugin.Log.LogInfo(sb.ToString());
         }
