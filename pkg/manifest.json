@@ -1,6 +1,6 @@
 {
   "name": "ChestButler",
-  "version_number": "2.1.0",
+  "version_number": "2.1.1",
   "website_url": "",
   "description": "Dump-and-sort chests: flag a chest as a Sorter and loot flies to the right chests. One-press Organize tidies the whole base and remembers each chest's role. Gather pulls recipe ingredients to the bench. Multiplayer-safe via MultiUserChest.",
   "dependencies": [

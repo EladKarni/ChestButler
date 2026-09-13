@@ -15,15 +15,23 @@ namespace ChestButler.Core
     internal static class Gather
     {
         internal static ConfigEntry<bool> Enabled;
+        internal static ConfigEntry<bool> BuildEnabled;
         internal static ConfigEntry<bool> ShowStorageCounts;
 
         internal static bool IsEnabled => Enabled == null || Enabled.Value;
+        internal static bool IsBuildEnabled => BuildEnabled == null || BuildEnabled.Value;
         internal static bool CountsShown => ShowStorageCounts == null || ShowStorageCounts.Value;
 
         internal static void Init(ConfigFile config)
         {
             Enabled = config.Bind("Gather", "Enabled", true,
                 new ConfigDescription("Show the Gather button in the crafting panel. Client-side."));
+
+            // 2.1.1: build gathering is gated separately from the crafting button. Someone who wants
+            // materials fetched at the bench does not necessarily want a place click reaching into
+            // their chests.
+            BuildEnabled = config.Bind("Gather", "BuildEnabled", true,
+                new ConfigDescription("When you place a piece you can't afford, fetch the missing materials from nearby chests. Client-side."));
 
             ShowStorageCounts = config.Bind("Gather", "ShowStorageCounts", true,
                 new ConfigDescription("Show \"(N in storage)\" beside each ingredient in the crafting panel. Client-side."));

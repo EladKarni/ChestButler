@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.1.1
+
+- Gather works for building now. If you place something you can't afford, the missing materials get pulled from nearby chests and it places on the same click. If another player owns the chest it can take a second click
+- new config `[Gather] BuildEnabled`, on by default. Turn it off if you don't want placing to take from your chests
+- build costs no longer end up in the crafting Gather list
+
 ## 2.1.0
 
 Valheim 1.0 support. Server and all clients have to update together, a 2.1 server won't let 2.0 clients in.

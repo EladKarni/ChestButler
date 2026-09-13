@@ -114,10 +114,25 @@ namespace ChestButler.Patches
             var inv = player.GetInventory();
             int inPlayer = inv != null ? inv.CountItems(sharedName, -1, true) : 0;
 
-            if (_sources == null) _sources = Gatherer.Sources();
-            int inStorage = Gatherer.CountInStorage(_sources, sharedName);
+            // The hammer's build HUD fills its cost rows through this same callback
+            // (Hud.SetupPieceInfo calls InventoryGui.SetupRequirement), so without this guard a
+            // piece's materials would land in the CRAFTING panel's need list and be fetched by the
+            // craft-side button. Build rows still get the storage annotation below; they read the
+            // throttled chest list, because that HUD refreshes every frame while the hammer is out.
+            bool build = BuildGatherPatch.InBuildInfo;
+            List<Container> sources;
+            if (build)
+            {
+                sources = BuildGather.SourcesCached();
+            }
+            else
+            {
+                if (_sources == null) _sources = Gatherer.Sources();
+                sources = _sources;
+            }
+            int inStorage = Gatherer.CountInStorage(sources, sharedName);
 
-            if (Seen.Add(sharedName) && Needs.Count < MaxNeeds)
+            if (!build && Seen.Add(sharedName) && Needs.Count < MaxNeeds)
             {
                 Needs.Add(new GatherNeed
                 {

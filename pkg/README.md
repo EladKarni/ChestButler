@@ -11,7 +11,7 @@ Toggle any chest into a dump chest with one button, or build the craftable **Sor
 Sorter chests get an **Organize** button. One press scans every chest in range and previews what would move. Press again and every item type consolidates into its best home, in place, while you carry nothing. Homes persist: chests keep their assigned role between runs, so a tidy base stays tidy and a second press right after the first has little or nothing left to do. Weapons, armor and tools get homes of their own, and small odds and ends share a misc chest instead of each claiming their own.
 
 **Gather at the crafting station** *(new in 2.0)*
-A **Gather** button under Craft pulls the selected recipe's missing ingredients from chests in range, scaled to your craft multiplier. Green `(N)` counts show what storage holds. Craft, then dump what's left into a Sorter chest and it flows back to where it belongs. Greyed out means there is nothing to fetch: you already carry what the recipe needs, or storage has none of what is missing.
+A **Gather** button under Craft pulls the selected recipe's missing ingredients from chests in range, scaled to your craft multiplier. Green `(N)` counts show what storage holds. Craft, then dump what's left into a Sorter chest and it flows back to where it belongs. Greyed out means there is nothing to fetch: you already carry what the recipe needs, or storage has none of what is missing. Since 2.1.1 it works for building too: place a piece you can't afford and the missing materials get pulled from chests in range.
 
 **Sign control, now with areas** *(area-off new in 2.0)*
 A sign next to a chest labels it: `sort: wood` claims a group, `sort: off` opts the chest out entirely. New in 2.0: add a number on its own line and the `off` covers every chest within that radius. One sign protects a whole room.
@@ -151,6 +151,7 @@ The config file is `BepInEx/config/eksolutions.chestbutler.cfg`, generated on fi
 | [Organize] IncludeGear | true | give weapons/armor/tools their own homes during Organize |
 | [Organize] MiscPromoteSlots | 24 | an unlisted item type gets its own chest only above this volume; below it, it shares the misc home |
 | [Gather] Enabled | true | show the Gather button, *client-side* |
+| [Gather] BuildEnabled | true | placing a piece you can't afford fetches the missing materials, *client-side* |
 | [Gather] ShowStorageCounts | true | show the green (N) storage counts in the recipe list, *client-side* |
 
 The `[ItemGroups]` section defines the item groups: stone, wood, ores, metals, cooking, meat, seeds, trophies, valuables, meads, ammo, hides, fuel. Every group is a comma separated list of item name tokens (wildcards allowed).
