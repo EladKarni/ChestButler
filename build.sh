@@ -56,9 +56,13 @@ fi
 for TMM in \
   "$HOME/AppData/Roaming/Thunderstore Mod Manager/DataFolder/Valheim" \
   "$HOME/AppData/Roaming/r2modmanPlus-local/Valheim" ; do
-  CACHE="$TMM/cache/EK_Solutions-ChestButler"
-  if [ -d "$CACHE" ]; then
-    find "$CACHE" -name "ChestButler.dll" -exec cp dist/ChestButler.dll {} \; -exec echo "-> synced manager cache: {}" \;
+  # ONLY the cache entry for the version just built. Syncing every cached version, which this did
+  # until 2.1.1, silently replaces the DLL of every OTHER profile as well: the manager deploys from
+  # this cache on launch, so a profile pinned to an older release quietly starts running the dev
+  # build and announces the dev version at the server handshake.
+  CACHE="$TMM/cache/EK_Solutions-ChestButler/$CSPROJ"
+  if [ -f "$CACHE/ChestButler.dll" ]; then
+    cp dist/ChestButler.dll "$CACHE/" && echo "-> synced manager cache: $CACHE"
   fi
 done
 echo "-> dist/ChestButler.dll"
