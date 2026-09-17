@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.1.2
+
+- new Puller Chest, in the hammer's Furniture tab. Open it and you get a list of everything in the chests around it, with a search box. Click an item to pull a stack into the chest, Shift-click to pull all of it. The sorter, Organize, Gather and Pull all leave a Puller Chest alone
+- the Puller Chest is a new piece, so players still on 2.1.1 can join a 2.1.2 server but won't see Puller Chests until they update
+- the sorter no longer sits there with items nobody has a chest for. If no chest holds the item it goes to the nearest empty chest, and if there's no empty chest, to the one with the most free slots. Chests with a pin, a sign or a station next to them are skipped, and so are empty chests Organize kept for a category. Turn it off with `[Sorting] FreeChestFallback`
+- weapons and armor in a sorter get sorted now too, same rules as everything else
+- the Sorter Chest and Puller Chest show their own names instead of Reinforced Chest
+
 ## 2.1.1
 
 - Gather works for building now. If you place something you can't afford, the missing materials get pulled from nearby chests and it places on the same click. If another player owns the chest it can take a second click

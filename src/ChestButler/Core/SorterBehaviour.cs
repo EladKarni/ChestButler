@@ -59,6 +59,7 @@ namespace ChestButler.Core
             float missCooldown = Throttle.MissCooldown(MissCooldown);
 
             var snapshot = new List<ItemDrop.ItemData>(inv.GetAllItems());
+            var claimedEmpty = new HashSet<Container>();   // 2.1.2: one new type per empty chest per tick
             foreach (var item in snapshot)
             {
                 if (budget <= 0) break;
@@ -74,7 +75,8 @@ namespace ChestButler.Core
                     _misses.Remove(norm);
                 }
 
-                var target = Router.FindTarget(_container, item, Plugin.SorterRadius.Value, out int amount);
+                var target = Router.FindTarget(_container, item, Plugin.SorterRadius.Value, out int amount,
+                                               claimedEmpty);
                 if (target == null || amount <= 0)
                 {
                     if (norm.Length > 0) _misses[norm] = now; // no home → stays in sorter

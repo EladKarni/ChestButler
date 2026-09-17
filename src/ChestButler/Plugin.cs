@@ -17,7 +17,7 @@ namespace ChestButler
     {
         public const string ModGuid = "eksolutions.chestbutler";
         public const string ModName = "ChestButler";
-        public const string ModVersion = "2.1.1";
+        public const string ModVersion = "2.1.2";
 
         internal static Plugin Instance;          // for StartCoroutine (Organize execution)
         internal static ManualLogSource Log;
@@ -25,6 +25,7 @@ namespace ChestButler
         internal static ConfigEntry<float> TransferInterval;
         internal static ConfigEntry<int> StacksPerTick;
         internal static ConfigEntry<bool> ContainsFallback;
+        internal static ConfigEntry<bool> FreeChestFallback;
         internal static ConfigEntry<bool> VehiclesAreStorage;
 
         // WAVE 0: the [Organize] entries now live in OrganizeConfig so that W1 can add to that
@@ -69,6 +70,11 @@ namespace ChestButler
                 new ConfigDescription("Route items to chests that already contain them when no explicit filter matches.",
                     null, new ConfigurationManagerAttributes { IsAdminOnly = true }));
 
+            // 2.1.2: admin-only for the same reason as ContainsFallback, it changes where items end up.
+            FreeChestFallback = Config.Bind("Sorting", "FreeChestFallback", true,
+                new ConfigDescription("When no chest holds an item yet, put it in the nearest empty chest, or the chest with the most free slots if none is empty. Chests with a pin, a sign label or a station next to them are never used for this, and empty Organize homes are kept for their category.",
+                    null, new ConfigurationManagerAttributes { IsAdminOnly = true }));
+
             VehiclesAreStorage = Config.Bind("Sorting", "VehiclesAreStorage", false,
                 new ConfigDescription("Treat cart and ship inventories as storage. Off (default): the sorter, Organize, Pull and Gather all ignore vehicles entirely - they are transport, and their own Pin/Pull buttons still work for manual loading.",
                     null, new ConfigurationManagerAttributes { IsAdminOnly = true }));
@@ -81,6 +87,7 @@ namespace ChestButler
             OrganizeConfig.Init(Config);       // W1 - Organize v2
             Gather.Init(Config);               // W2 - Gather
             SorterChestPiece.Register();       // W3 - Dedicated Sorter Chest
+            PullerChestPiece.Register();       // 2.1.2 - Puller Chest
 
             _harmony = new Harmony(ModGuid);
             _harmony.PatchAll();

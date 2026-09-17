@@ -58,6 +58,12 @@ namespace ChestButler.Core
                 config.AddRequirement(new RequirementConfig("BronzeNails", 5, 0, true));
 
                 var piece = new CustomPiece(PrefabName, ClonedFrom, config);
+
+                // 2.1.2: hover text and the chest panel title said "Reinforced Chest", the same as the
+                // vanilla chest and, once the Puller Chest existed, the same as that too.
+                var container = piece.PiecePrefab != null ? piece.PiecePrefab.GetComponent<Container>() : null;
+                if (container != null) container.m_name = config.Name;
+
                 if (!PieceManager.Instance.AddPiece(piece))
                 {
                     Plugin.Log.LogWarning("[sorterchest] Jotunn refused the piece; it will not be buildable");

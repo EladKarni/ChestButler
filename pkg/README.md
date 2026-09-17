@@ -1,11 +1,14 @@
 # ChestButler
 
-Sorts your storage for you. Mark a chest as a Sorter, dump everything into it, close the lid, and the items get moved to the right chests around your base. Press **Organize** and the whole base tidies itself. Press **Gather** at a crafting station and the missing ingredients come to you.
+Sorts your storage for you. Mark a chest as a Sorter, dump everything into it, close the lid, and the items get moved to the right chests around your base. Press **Organize** and the whole base tidies itself. Press **Gather** at a crafting station and the missing ingredients come to you. Open a **Puller Chest** and pick anything from storage.
 
 ## Features
 
 **Sorter chests**
-Toggle any chest into a dump chest with one button, or build the craftable **Sorter Chest**, which is one out of the box. Anything inside gets distributed to nearby chests the moment you close it. Items that no chest wants stay in the sorter, so nothing is ever lost or dropped.
+Toggle any chest into a dump chest with one button, or build the craftable **Sorter Chest**, which is one out of the box. Anything inside gets distributed to nearby chests the moment you close it. An item no chest holds yet goes to the nearest empty chest, or the chest with the most free slots if none is empty. It only stays in the sorter when everything is full, so nothing is ever lost or dropped.
+
+**Puller Chest** *(new in 2.1.2)*
+Build a **Puller Chest** and open it to see everything stored in the chests around it, with a search box. Click an item to pull a stack of it into the Puller, Shift-click to pull all of it. The sorter, Organize, Gather and Pull never touch what's in a Puller Chest.
 
 **Organize your whole base**
 Sorter chests get an **Organize** button. One press scans every chest in range and previews what would move. Press again and every item type consolidates into its best home, in place, while you carry nothing. Homes persist: chests keep their assigned role between runs, so a tidy base stays tidy and a second press right after the first has little or nothing left to do. Weapons, armor and tools get homes of their own, and small odds and ends share a misc chest instead of each claiming their own.
@@ -41,7 +44,8 @@ Organize thinks in item types. A hand-curated chest that mixes types, like a "me
 2. Dump your inventory into it and close the chest. Items fly to whichever chests already hold those types.
 3. Protect any curated chests (see above), then press `Organize` in the sorter chest. It previews ("move 340 items across 12 chests"), the button turns into `Confirm?`, and a second press runs it.
 4. At a crafting station, select a recipe and press `Gather` to pull the missing ingredients from storage.
-5. For a dedicated chest (carrots and onions near the cauldron): put samples in, press `Pin`. Press `Pull` any time to restock it from storage.
+5. Build a **Puller Chest** (Furniture tab), open it, search for an item and click it to pull a stack into the chest.
+6. For a dedicated chest (carrots and onions near the cauldron): put samples in, press `Pin`. Press `Pull` any time to restock it from storage.
 
 ## Installing
 
@@ -113,6 +117,8 @@ Group names and item names (wildcards allowed) both work as tokens. A number lin
 
 For each item, in order: a chest that pins the item wins first, then a chest whose sign or group covers it, then a chest next to a mapped processor, then (during Organize) an established home from a previous run, then any chest that already contains some. Ties go to higher sign priority, then for live sorting to the chest holding the most of that item, then to the nearest one; Organize breaks its ties by anchor strength and distance instead, so an organized base does not churn.
 
+If none of that finds a chest, the sorter uses the nearest empty chest, and if nothing is empty, the chest with the most free slots. Chests with a pin, a sign or a station are never used for this, and neither are empty chests Organize kept for a category (`FreeChestFallback`).
+
 ### Organize: one-press base cleanup
 
 Each item type gets exactly one winning home, chests are claimed by volume, and the assignment is remembered on the chests. The next Organize keeps established homes in place instead of reshuffling. A category can still move if it no longer fits its chest.
@@ -144,6 +150,7 @@ The config file is `BepInEx/config/eksolutions.chestbutler.cfg`, generated on fi
 | [Sorting] TransferInterval | 1.0 | seconds between transfer ticks per sorter (1 to 10), *client-side* |
 | [Sorting] StacksPerTick | 2 | item stacks moved per tick (1 to 8), *client-side* |
 | [Sorting] ContainsFallback | true | route items to chests that already contain them when no filter matches |
+| [Sorting] FreeChestFallback | true | an item no chest holds goes to the nearest empty chest, or the chest with the most free slots |
 | [Sorting] VehiclesAreStorage | false | treat cart and ship inventories as storage again |
 | [Organize] MovesPerSecond | 25 | transfer rate while an Organize run executes, *client-side* |
 | [Organize] MaxMovesPerRun | 500 | safety cap per run; the message tells you to press again if it was hit, *client-side* |

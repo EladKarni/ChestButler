@@ -1,8 +1,8 @@
 {
   "name": "ChestButler",
-  "version_number": "2.1.1",
+  "version_number": "2.1.2",
   "website_url": "",
-  "description": "Dump-and-sort chests: flag a chest as a Sorter and loot flies to the right chests. One-press Organize tidies the whole base and remembers each chest's role. Gather pulls recipe ingredients to the bench. Multiplayer-safe via MultiUserChest.",
+  "description": "Dump-and-sort chests: a Sorter sends loot to the right chests and a Puller Chest fetches any item you search for. One-press Organize tidies the whole base. Gather pulls recipe ingredients to the bench. Multiplayer-safe via MultiUserChest.",
   "dependencies": [
     "denikson-BepInExPack_Valheim-5.4.2350",
     "ValheimModding-Jotunn-2.30.0",

@@ -168,6 +168,10 @@ namespace ChestButler.Core
             spec.Home = GetHome(c);
             ParseNearestSign(c, spec);
 
+            // 2.1.2: a Puller Chest holds what the player just asked for. Ignore makes every automatic
+            // system (sorter, Organize, Gather, Pull) leave it alone, exactly like a sort: off chest.
+            if (PullerChestPiece.IsPullerChest(c)) spec.Ignore = true;
+
             Cache[c] = new KeyValuePair<float, FilterSpec>(Time.time, spec);
             return spec;
         }

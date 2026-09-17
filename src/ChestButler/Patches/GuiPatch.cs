@@ -359,7 +359,9 @@ namespace ChestButler.Patches
         private static void Refresh()
         {
             if (_bar == null) return;
-            bool usable = _current != null && SorterZdo.HasValidNView(_current);
+            // 2.1.2: a Puller Chest has its own panel and none of these buttons mean anything on it.
+            bool usable = _current != null && SorterZdo.HasValidNView(_current) &&
+                          !PullerChestPiece.IsPullerChest(_current);
             _bar.gameObject.SetActive(usable);
             if (!usable) return;
 

@@ -52,7 +52,9 @@
 
 Storage in Valheim gets out of hand fast. You come back from a mining trip and spend five minutes walking between chests putting everything away.
 
-This mod adds a "Sorter" toggle to chests. Anything you dump into a sorter chest gets moved to the right chest nearby when you close it. Stone goes where your stone already is, carrots end up in the kitchen, and anything the mod can't figure out just stays in the sorter so nothing is ever lost.
+This mod adds a "Sorter" toggle to chests. Anything you dump into a sorter chest gets moved to the right chest nearby when you close it. Stone goes where your stone already is, carrots end up in the kitchen, and something nobody has a chest for yet goes into an empty chest. It only stays in the sorter when every chest is full, so nothing is ever lost.
+
+The Puller Chest does the opposite. Open it, search for what you want in the list of everything stored around it, and click to pull it into that chest.
 
 It works in the other direction too. You can pin a set of items to a chest and give it a Pull button that grabs those items from nearby storage. I use this for a cooking chest next to the cauldron that restocks itself on demand.
 
