@@ -15,7 +15,8 @@ namespace ChestButler.Core
     /// contains tier picks up every later stack of that type, so the fallback only ever decides where
     /// a NEW type starts. Chests that already mean something are never picked by it: a pin or sign
     /// label, a station next to the chest, and for the empty-chest step an Organize home too, since an
-    /// empty home is reserved for its bucket. The contains tier also routes non-stackables now, or
+    /// empty home is reserved for its bucket. A claimed home can still take an item as the very last
+    /// resort, because on a fully organized base every chest has one. The contains tier also routes non-stackables now, or
     /// every sword would claim an empty chest of its own.
     ///
     /// W1 (v2 plan §15.8): the STATION tier is new. <c>OrganizePlanner</c>'s doc claimed it mirrored
@@ -32,7 +33,7 @@ namespace ChestButler.Core
         /// a newly built one starts attracting items at most this late.</summary>
         private const float StationCacheTtl = 10f;
 
-        /// <param name="claimedEmpty">Empty chests already handed out earlier in the same sorter tick.
+        /// <param name="claimedEmpty">Chests the fallback already handed out earlier in the same tick.
         /// A transfer into a chest another peer owns is an RPC, so that chest still reads empty locally
         /// and two new types in one tick would otherwise both start in it. Null to skip the check.</param>
         internal static Container FindTarget(Container sorter, ItemDrop.ItemData item, float radius, out int amount,
@@ -52,9 +53,12 @@ namespace ChestButler.Core
 
             Container empty = null;          // nearest eligible empty chest
             int emptyRoom = 0;
-            Container roomiest = null;       // eligible chest with the most free slots, nearest on ties
+            Container roomiest = null;       // unclaimed chest with the most free slots, nearest on ties
             int roomiestSlots = 0;
             int roomiestRoom = 0;
+            Container roomiestHome = null;   // same, but a chest Organize claimed: last resort
+            int roomiestHomeSlots = 0;
+            int roomiestHomeRoom = 0;
 
             foreach (var c in ContainerTracker.Candidates(sorter, radius))
             {
@@ -84,19 +88,26 @@ namespace ChestButler.Core
 
                 if (tier == 0)
                 {
-                    if (empty == null && inv.GetAllItems().Count == 0 && spec.Home == null &&
-                        (claimedEmpty == null || !claimedEmpty.Contains(c)))
+                    if (claimedEmpty != null && claimedEmpty.Contains(c)) continue;   // taken this tick
+
+                    if (empty == null && inv.GetAllItems().Count == 0 && spec.Home == null)
                     {
                         empty = c;
                         emptyRoom = room;
                     }
 
+                    // A chest Organize claimed as some bucket's home is the LAST place a stray type
+                    // should land, because the next Organize press will move it straight back out. On a
+                    // fully organized base every chest has a home though, so it beats leaving the item
+                    // in the sorter, which is the whole complaint this fallback exists to answer.
                     int slots = inv.GetEmptySlots();
-                    if (slots > roomiestSlots)
+                    if (spec.Home == null)
                     {
-                        roomiest = c;
-                        roomiestSlots = slots;
-                        roomiestRoom = room;
+                        if (slots > roomiestSlots) { roomiest = c; roomiestSlots = slots; roomiestRoom = room; }
+                    }
+                    else if (slots > roomiestHomeSlots)
+                    {
+                        roomiestHome = c; roomiestHomeSlots = slots; roomiestHomeRoom = room;
                     }
                     continue;
                 }
@@ -127,9 +138,16 @@ namespace ChestButler.Core
                 return empty;
             }
 
+            if (roomiest == null && roomiestHome != null)
+            {
+                roomiest = roomiestHome;
+                roomiestRoom = roomiestHomeRoom;
+            }
+
             if (roomiest != null)
             {
                 amount = Math.Min(roomiestRoom, item.m_stack);
+                claimedEmpty?.Add(roomiest);
                 return roomiest;
             }
 

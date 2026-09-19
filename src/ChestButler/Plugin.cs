@@ -17,7 +17,7 @@ namespace ChestButler
     {
         public const string ModGuid = "eksolutions.chestbutler";
         public const string ModName = "ChestButler";
-        public const string ModVersion = "2.1.2";
+        public const string ModVersion = "2.1.3";
 
         internal static Plugin Instance;          // for StartCoroutine (Organize execution)
         internal static ManualLogSource Log;
@@ -86,6 +86,7 @@ namespace ChestButler
             // own module; do not add config binds or registrations directly to this method.
             OrganizeConfig.Init(Config);       // W1 - Organize v2
             Gather.Init(Config);               // W2 - Gather
+            PullerConfig.Init(Config);         // 2.1.3 - Puller Chest return timer
             SorterChestPiece.Register();       // W3 - Dedicated Sorter Chest
             PullerChestPiece.Register();       // 2.1.2 - Puller Chest
 

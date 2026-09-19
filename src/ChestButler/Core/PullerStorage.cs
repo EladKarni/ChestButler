@@ -139,6 +139,97 @@ namespace ChestButler.Core
             return moved;
         }
 
+        /// <summary>Capped per call. Each returned stack costs a full Router.FindTarget sweep of the
+        /// base, so a Puller used as a second wardrobe would otherwise pay for 24 of them in one frame.
+        /// The timer picks up the rest on its next tick and the button can be pressed again.</summary>
+        private const int MaxReturnsPerCall = 16;
+
+        /// <summary>Send what is in the Puller back to storage, routing every stack exactly as the
+        /// sorter would (<see cref="Router.FindTarget"/>), so items land in the chest that holds them,
+        /// in a chest a pin or sign claims, or in a free chest. Driven by the panel's Send back button
+        /// and by <see cref="PullerBehaviour"/>'s timer. Returns how many items were issued.</summary>
+        internal static int ReturnAll(Container puller, out int types)
+        {
+            types = 0;
+            int moved = 0;
+            if (puller == null) return 0;
+
+            var inv = puller.GetInventory();
+            var nv = SorterZdo.NView(puller);
+            if (inv == null || nv == null || !nv.IsValid()) return 0;
+
+            // Rule zero, exactly as in SorterBehaviour and Organizer: only the ZDO owner moves items
+            // OUT of a chest. MUC's AddItemToChest removes from the source inventory locally and
+            // unconditionally, and a non-owner's edit is never saved (Container.Save is owner-gated),
+            // so the next Load brings the items back while the target keeps its copy. That is a
+            // duplication, and it is reachable: MUC lets a second player hold this chest open without
+            // owning it, and the Send back button is theirs to press.
+            long owner = nv.GetZDO().GetOwner();
+            if (owner != 0L && !nv.IsOwner()) return 0;
+            if (!nv.IsOwner()) nv.ClaimOwnership();
+
+            // An Organize run has already resolved where every stack in range belongs and is issuing
+            // moves against that plan. Returning items into it mid-run is how a plan ends up reporting
+            // skipped moves it cannot explain.
+            if (Organizer.IsRunning) return 0;
+
+            var block = InventoryBlock.Get(inv);
+            var claimedEmpty = new HashSet<Container>();
+            var promised = new Dictionary<Container, int>();
+            var seen = new HashSet<string>();
+            int issued = 0;
+
+            // The throttle only knows what it is allowed to measure, and this is a base-wide sweep per
+            // stack, the same shape of work as the sorter tick and an Organize run.
+            using (Throttle.Measure())
+            {
+                // Snapshot: an inline transfer mutates this inventory while we walk it.
+                foreach (var item in new List<ItemDrop.ItemData>(inv.GetAllItems()))
+                {
+                    if (issued >= MaxReturnsPerCall) break;
+                    if (item?.m_shared == null) continue;
+                    if (block != null && block.IsSlotBlocked(item.m_gridPos)) continue;   // already in flight
+
+                    var target = Router.FindTarget(puller, item, Plugin.SorterRadius.Value, out int amount, claimedEmpty);
+                    if (target == null || amount <= 0) continue;
+
+                    // Router.Room reads a LOCAL inventory, which does not reflect what this same call
+                    // already sent to that chest over RPC. Without this, ten stacks all pass the room
+                    // check for one chest's worth of space (v2 plan §16.2.3).
+                    int already = promised.TryGetValue(target, out int p) ? p : 0;
+                    amount -= already;
+                    if (amount <= 0) continue;
+
+                    // Somebody has that chest open on this client: their deposit and our push would
+                    // race, so leave it for the next call (v2 plan §16.2.2).
+                    if (target.IsInUse()) continue;
+
+                    var tgtNv = SorterZdo.NView(target);
+                    if (tgtNv == null || !tgtNv.IsValid()) continue;
+
+                    // §16.2.9: MUC silently declines an add to a chest no peer owns, which is a normal
+                    // state for a chest in the outer activeArea band. Claim it the way Organize does.
+                    if (!tgtNv.HasOwner()) tgtNv.ClaimOwnership();
+
+                    var request = ContainerHandler.AddItemToChest(
+                        target, item, inv, new Vector2i(-1, -1),
+                        nv.GetZDO().m_uid, amount);
+
+                    // A non-null request with no RequestID is MUC's dummy decline: nothing was removed
+                    // and nothing was sent. Counting those as moved is what gave Organize phantom
+                    // successes, and here it would tell the timer it made progress forever.
+                    if (request != null && request.RequestID == 0) continue;
+
+                    promised[target] = already + amount;
+                    moved += amount;
+                    issued++;
+                    if (seen.Add(Names.Normalize(item.m_shared.m_name))) types++;
+                }
+            }
+
+            return moved;
+        }
+
         private static int RoomFor(Inventory inv, ItemDrop.ItemData item, int max)
         {
             if (max <= 1) return inv.GetEmptySlots();                    // one slot per item

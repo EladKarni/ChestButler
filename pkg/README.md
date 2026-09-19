@@ -8,7 +8,7 @@ Sorts your storage for you. Mark a chest as a Sorter, dump everything into it, c
 Toggle any chest into a dump chest with one button, or build the craftable **Sorter Chest**, which is one out of the box. Anything inside gets distributed to nearby chests the moment you close it. An item no chest holds yet goes to the nearest empty chest, or the chest with the most free slots if none is empty. It only stays in the sorter when everything is full, so nothing is ever lost or dropped.
 
 **Puller Chest** *(new in 2.1.2)*
-Build a **Puller Chest** and open it to see everything stored in the chests around it, with a search box. Click an item to pull a stack of it into the Puller, Shift-click to pull all of it. The sorter, Organize, Gather and Pull never touch what's in a Puller Chest.
+Build a **Puller Chest** and open it to see everything stored in the chests around it, with a search box. Click an item to pull a stack of it into the Puller, Shift-click to pull all of it. The sorter, Organize, Gather and Pull never touch what's in a Puller Chest, so press **Send back** when you're done and anything left goes back to storage. It also empties itself 5 minutes after you last touch it (`[Puller] ReturnAfterSeconds`).
 
 **Organize your whole base**
 Sorter chests get an **Organize** button. One press scans every chest in range and previews what would move. Press again and every item type consolidates into its best home, in place, while you carry nothing. Homes persist: chests keep their assigned role between runs, so a tidy base stays tidy and a second press right after the first has little or nothing left to do. Weapons, armor and tools get homes of their own, and small odds and ends share a misc chest instead of each claiming their own.
@@ -151,6 +151,7 @@ The config file is `BepInEx/config/eksolutions.chestbutler.cfg`, generated on fi
 | [Sorting] StacksPerTick | 2 | item stacks moved per tick (1 to 8), *client-side* |
 | [Sorting] ContainsFallback | true | route items to chests that already contain them when no filter matches |
 | [Sorting] FreeChestFallback | true | an item no chest holds goes to the nearest empty chest, or the chest with the most free slots |
+| [Puller] ReturnAfterSeconds | 300 | seconds before a Puller Chest sends what is left back to storage, 0 to leave it there |
 | [Sorting] VehiclesAreStorage | false | treat cart and ship inventories as storage again |
 | [Organize] MovesPerSecond | 25 | transfer rate while an Organize run executes, *client-side* |
 | [Organize] MaxMovesPerRun | 500 | safety cap per run; the message tells you to press again if it was hit, *client-side* |

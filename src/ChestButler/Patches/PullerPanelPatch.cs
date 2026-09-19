@@ -27,6 +27,7 @@ namespace ChestButler.Patches
         private const float TitleHeight = 32f;
         private const float SearchHeight = 34f;
         private const float StatusHeight = 26f;
+        private const float ButtonHeight = 34f;
 
         private static readonly AccessTools.FieldRef<InventoryGui, Container> CurrentContainerRef =
             AccessTools.FieldRefAccess<InventoryGui, Container>("m_currentContainer");
@@ -41,6 +42,7 @@ namespace ChestButler.Patches
         private static ScrollRect _scroll;
         private static RectTransform _content;
         private static TMP_Text _status;
+        private static Button _sendBack;
         private static float _rowHeight = 30f;
 
         private static readonly List<GameObject> Rows = new List<GameObject>();
@@ -75,7 +77,14 @@ namespace ChestButler.Patches
         [HarmonyPostfix, HarmonyPatch("UpdateContainer")]
         private static void UpdateContainerPostfix(InventoryGui __instance)
         {
-            if (_chest == null) return;
+            // Unity fake-null: a chest destroyed while open (a troll, a neighbour with a hammer, a
+            // zone unload) reads as null here, and vanilla never re-enables the crafting panel by
+            // itself - the one SetActive(true) is in InventoryGui.Awake.
+            if (_chest == null)
+            {
+                if (_hidCrafting || (_panel != null && _panel.gameObject.activeSelf)) Close(__instance);
+                return;
+            }
             if (CurrentContainerRef(__instance) != _chest)
             {
                 Close(__instance);
@@ -96,6 +105,15 @@ namespace ChestButler.Patches
 
         private const int RowsPerNotch = 3;
 
+        private static bool PointerOverList()
+        {
+            if (_scroll == null || _scroll.viewport == null) return false;
+            var view = _scroll.viewport;
+            var canvas = view.GetComponentInParent<Canvas>();
+            var cam = canvas != null && canvas.renderMode != RenderMode.ScreenSpaceOverlay ? canvas.worldCamera : null;
+            return RectTransformUtility.RectangleContainsScreenPoint(view, ZInput.pointerPosition, cam);
+        }
+
         /// <summary>Mouse wheel over the list moves it a fixed number of rows per notch.
         ///
         /// Left to its own OnScroll, the ScrollRect crawled a few pixels per notch: the wheel delta the
@@ -109,11 +127,9 @@ namespace ChestButler.Patches
             float wheel = ZInput.GetMouseScrollWheel();
             if (Mathf.Approximately(wheel, 0f)) return;
 
-            var view = _scroll.viewport;
-            var canvas = view.GetComponentInParent<Canvas>();
-            var cam = canvas != null && canvas.renderMode != RenderMode.ScreenSpaceOverlay ? canvas.worldCamera : null;
-            if (!RectTransformUtility.RectangleContainsScreenPoint(view, ZInput.pointerPosition, cam)) return;
+            if (!PointerOverList()) return;
 
+            var view = _scroll.viewport;
             float overflow = _content.rect.height - view.rect.height;
             if (overflow <= 0f) return;
 
@@ -171,6 +187,12 @@ namespace ChestButler.Patches
         {
             _censusAt = Time.unscaledTime;
             if (_chest == null) return;
+
+            // Rows are pooled and a click carries the row's INDEX, so re-sorting the list under the
+            // pointer turns a click on Wood into a pull of Stone. Counts change on their own all the
+            // time (a smelter finishing, another player moving a stack), so hold the redraw while the
+            // pointer is over the list. Typing still redraws: that comes through Rebuild directly.
+            if (!force && PointerOverList()) return;
 
             var fresh = PullerStorage.Census(_chest);
 
@@ -246,6 +268,13 @@ namespace ChestButler.Patches
             if (_panel != null) return true;
             if (gui == null || gui.m_crafting == null) return false;
 
+            // A world reload destroys the panel with the scene, and _panel fake-nulls so we land here
+            // again - but these lists still hold the dead rows, and RowAt would hand one back forever.
+            // GuiPatch and GatherPatch never hit this because they pool nothing.
+            Rows.Clear();
+            RowNames.Clear();
+            _title = null; _search = null; _scroll = null; _content = null; _status = null; _sendBack = null;
+
             var crafting = gui.m_crafting;
             var parent = crafting.parent as RectTransform;
             if (parent == null) return false;
@@ -280,8 +309,9 @@ namespace ChestButler.Patches
 
                 BuildTitle(gui);
                 BuildSearch();
-                BuildList(gui);
                 BuildStatus(gui);
+                BuildSendBack(gui);
+                BuildList(gui);
 
                 _panel.gameObject.SetActive(false);
                 Plugin.Log.LogInfo("[puller] panel built over the crafting panel (" +
@@ -368,7 +398,8 @@ namespace ChestButler.Patches
             viewRt.anchorMax = Vector2.one;
             viewRt.pivot = new Vector2(0.5f, 0.5f);
             float listTop = Pad + TitleHeight + 4f + (_search != null ? SearchHeight + 8f : 0f);
-            viewRt.offsetMin = new Vector2(Pad, Pad + StatusHeight);
+            float bottom = Pad + StatusHeight + (_sendBack != null ? ButtonHeight + 10f : 0f);
+            viewRt.offsetMin = new Vector2(Pad, bottom);
             viewRt.offsetMax = new Vector2(-Pad, -listTop);
 
             // A near-transparent image so the mouse wheel and drag reach the ScrollRect between rows.
@@ -411,6 +442,72 @@ namespace ChestButler.Patches
             rt.pivot = new Vector2(0.5f, 0f);
             rt.offsetMin = new Vector2(Pad, Pad * 0.5f);
             rt.offsetMax = new Vector2(-Pad, Pad * 0.5f + StatusHeight);
+        }
+
+        /// <summary>Send back: empty the Puller into storage by hand, without waiting out the timer.
+        ///
+        /// A Puller Chest is deliberately invisible to the sorter, Organize and Gather, so anything
+        /// parked in one is out of reach of everything else the mod does. This is the way back, and
+        /// <see cref="PullerBehaviour"/> does the same thing on its own after
+        /// <c>[Puller] ReturnAfterSeconds</c>.</summary>
+        private static void BuildSendBack(InventoryGui gui)
+        {
+            if (gui.m_takeAllButton == null) return;
+
+            var btn = Object.Instantiate(gui.m_takeAllButton, _panel, false);
+            btn.name = "psort_puller_sendback";
+
+            // All of them: a second Localize would re-localize the subtree a frame after we set the
+            // label and put "Take all" back. The tooltip belongs to the button we cloned.
+            StripLocalize(btn.gameObject);
+            foreach (var gp in btn.GetComponentsInChildren<UIGamePad>(true))
+                Object.DestroyImmediate(gp);
+            foreach (var mb in btn.GetComponentsInChildren<MonoBehaviour>(true))
+                if (mb.GetType().Name == "UITooltip") Object.DestroyImmediate(mb);
+
+            btn.onClick = new Button.ButtonClickedEvent();
+            btn.onClick.AddListener(OnSendBackClick);
+
+            var label = btn.GetComponentInChildren<TMP_Text>();
+            if (label != null)
+            {
+                float vanilla = label.fontSize;
+                label.enableAutoSizing = true;
+                label.fontSizeMax = vanilla;
+                label.fontSizeMin = vanilla - 4f;
+                label.text = "Send back";
+            }
+
+            var rt = btn.GetComponent<RectTransform>();
+            rt.anchorMin = new Vector2(0f, 0f);
+            rt.anchorMax = new Vector2(1f, 0f);
+            rt.pivot = new Vector2(0.5f, 0f);
+            rt.offsetMin = new Vector2(Pad * 3f, Pad * 0.5f + StatusHeight + 6f);
+            rt.offsetMax = new Vector2(-Pad * 3f, Pad * 0.5f + StatusHeight + 6f + ButtonHeight);
+            rt.localScale = Vector3.one;
+
+            _sendBack = btn;
+
+            // W4's rule: reachable on a controller. The rows are pooled and rebuilt constantly, so
+            // they stay mouse-only for now; the search box and this button are the two fixed controls.
+            var row = new List<Selectable>();
+            if (_search != null) row.Add(_search);
+            row.Add(btn);
+            GamepadNav.LinkRow(row);
+            if (gui.m_takeAllButton != null) GamepadNav.AttachRowToAnchor(gui.m_takeAllButton, row);
+        }
+
+        private static void OnSendBackClick()
+        {
+            if (_chest == null) return;
+
+            int moved = PullerStorage.ReturnAll(_chest, out int types);
+            Msg(moved > 0
+                ? "Sent back " + moved + " item" + (moved == 1 ? "" : "s") +
+                  " (" + types + " type" + (types == 1 ? "" : "s") + ")"
+                : "Nothing to send back, or no chest in range has room");
+
+            _censusAt = Time.unscaledTime - CensusInterval + 0.3f;
         }
 
         /// <summary>The row at <paramref name="index"/>, cloned from the recipe element the crafting

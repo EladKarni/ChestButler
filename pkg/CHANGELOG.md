@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.1.3
+
+- a **Send back** button in the Puller Chest. It sends everything in the chest back to storage, using the same rules the sorter uses
+- a Puller Chest also empties itself back into storage 5 minutes after you last touch it, so materials can't go missing from Gather and the sorter just because you left them in there. Change it or turn it off with `[Puller] ReturnAfterSeconds`
+- an item never lands in a chest Organize is keeping for a category unless there is nowhere else left
+- fixes found in review: pressing Send back on a chest you don't own could duplicate items in multiplayer, transfers the network declined were counted as moved, and the item list could re-sort under your cursor so a click pulled the wrong thing. The list also stayed empty after returning to the main menu and loading a world again
+
 ## 2.1.2
 
 - new Puller Chest, in the hammer's Furniture tab. Open it and you get a list of everything in the chests around it, with a search box. Click an item to pull a stack into the chest, Shift-click to pull all of it. The sorter, Organize, Gather and Pull all leave a Puller Chest alone
